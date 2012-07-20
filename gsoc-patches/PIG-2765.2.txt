@@ -1,0 +1,2092 @@
+Index: test/org/apache/pig/test/TestCubeOperator.java
+===================================================================
+--- test/org/apache/pig/test/TestCubeOperator.java	(revision 1360329)
++++ test/org/apache/pig/test/TestCubeOperator.java	(working copy)
+@@ -61,32 +61,21 @@
+ 	pigServer = new PigServer("local");
+ 
+ 	data = resetData(pigServer);
+-	data.set("input", 
+-		tuple("dog", "miami", 12),
+-		tuple("cat", "miami", 18),
+-		tuple("turtle", "tampa", 4),
+-		tuple("dog", "tampa", 14),
+-		tuple("cat", "naples", 9),
+-		tuple("dog", "naples", 5),
+-		tuple("turtle", "naples", 1));
++	data.set("input", tuple("dog", "miami", 12), tuple("cat", "miami", 18),
++	        tuple("turtle", "tampa", 4), tuple("dog", "tampa", 14), tuple("cat", "naples", 9),
++	        tuple("dog", "naples", 5), tuple("turtle", "naples", 1));
+ 
+-	data.set("input1", 
+-		tuple("u1,men,green,mango"),
+-		tuple("u2,men,red,mango"),
+-		tuple("u3,men,green,apple"),
+-		tuple("u4,women,red,mango"),
+-		tuple("u6,women,green,mango"),
+-		tuple("u7,men,red,apple"),
+-		tuple("u8,men,green,mango"),
+-		tuple("u9,women,red,apple"),
+-		tuple("u10,women,green,apple"),
+-		tuple("u11,men,red,apple"),
+-		tuple("u12,women,green,mango"));
+-	
+-	data.set("input3", 
+-		tuple("dog", "miami", 12),
+-		tuple(null, "miami", 18));
++	data.set("input1", tuple("u1,men,green,mango"), tuple("u2,men,red,mango"),
++	        tuple("u3,men,green,apple"), tuple("u4,women,red,mango"),
++	        tuple("u6,women,green,mango"), tuple("u7,men,red,apple"),
++	        tuple("u8,men,green,mango"), tuple("u9,women,red,apple"),
++	        tuple("u10,women,green,apple"), tuple("u11,men,red,apple"),
++	        tuple("u12,women,green,mango"));
+ 
++	data.set("input2", tuple("dog", "miami", "white", "pet", 5));
++
++	data.set("input3", tuple("dog", "miami", 12), tuple(null, "miami", 18));
++
+     }
+ 
+     @AfterClass
+@@ -96,70 +85,126 @@
+     @Test
+     public void testCubeBasic() throws IOException {
+ 	// basic correctness test
+-	String query =
+-		"a = load 'input' USING mock.Storage() as (x:chararray,y:chararray,z:long);" +
+-			"b = cube a by (x,y);" +
+-			"c = foreach b generate flatten(group) as (type,location), COUNT_STAR(cube) as count, SUM(cube.z) as total;" +
+-			"store c into 'output' using mock.Storage();";
++	String query = "a = load 'input' USING mock.Storage() as (x:chararray,y:chararray,z:long);"
++	        + "b = cube a by cube(x,y);"
++	        + "c = foreach b generate flatten(group) as (type,location), COUNT_STAR(cube) as count, SUM(cube.z) as total;"
++	        + "store c into 'output' using mock.Storage();";
+ 	Util.registerMultiLineQuery(pigServer, query);
+ 
+ 	Set<Tuple> expected = ImmutableSet.of(
+-		tf.newTuple(Lists.newArrayList("cat", "miami", (long)1, (long)18)),
+-		tf.newTuple(Lists.newArrayList("cat", "naples", (long)1, (long)9)),
+-		tf.newTuple(Lists.newArrayList("cat", null, (long)2, (long)27)),
+-		tf.newTuple(Lists.newArrayList("dog", "miami", (long)1, (long)12)),
+-		tf.newTuple(Lists.newArrayList("dog", "tampa", (long)1, (long)14)),
+-		tf.newTuple(Lists.newArrayList("dog", "naples", (long)1, (long)5)),
+-		tf.newTuple(Lists.newArrayList("dog", null, (long)3, (long)31)),
+-		tf.newTuple(Lists.newArrayList("turtle", "tampa", (long)1, (long)4)),
+-		tf.newTuple(Lists.newArrayList("turtle", "naples", (long)1, (long)1)),
+-		tf.newTuple(Lists.newArrayList("turtle", null, (long)2, (long)5)),
+-		tf.newTuple(Lists.newArrayList(null, "miami", (long)2, (long)30)),
+-		tf.newTuple(Lists.newArrayList(null, "tampa", (long)2, (long)18)),
+-		tf.newTuple(Lists.newArrayList(null, "naples", (long)3, (long)15)),
+-		tf.newTuple(Lists.newArrayList(null, null, (long)7, (long)63))
+-		);
++	        tf.newTuple(Lists.newArrayList("cat", "miami", (long) 1, (long) 18)),
++	        tf.newTuple(Lists.newArrayList("cat", "naples", (long) 1, (long) 9)),
++	        tf.newTuple(Lists.newArrayList("cat", null, (long) 2, (long) 27)),
++	        tf.newTuple(Lists.newArrayList("dog", "miami", (long) 1, (long) 12)),
++	        tf.newTuple(Lists.newArrayList("dog", "tampa", (long) 1, (long) 14)),
++	        tf.newTuple(Lists.newArrayList("dog", "naples", (long) 1, (long) 5)),
++	        tf.newTuple(Lists.newArrayList("dog", null, (long) 3, (long) 31)),
++	        tf.newTuple(Lists.newArrayList("turtle", "tampa", (long) 1, (long) 4)),
++	        tf.newTuple(Lists.newArrayList("turtle", "naples", (long) 1, (long) 1)),
++	        tf.newTuple(Lists.newArrayList("turtle", null, (long) 2, (long) 5)),
++	        tf.newTuple(Lists.newArrayList(null, "miami", (long) 2, (long) 30)),
++	        tf.newTuple(Lists.newArrayList(null, "tampa", (long) 2, (long) 18)),
++	        tf.newTuple(Lists.newArrayList(null, "naples", (long) 3, (long) 15)),
++	        tf.newTuple(Lists.newArrayList(null, null, (long) 7, (long) 63)));
+ 
+ 	List<Tuple> out = data.get("output");
+-	for( Tuple tup : out ) {
+-	    assertTrue(expected+" contains "+tup, expected.contains(tup));
++	for (Tuple tup : out) {
++	    assertTrue(expected + " contains " + tup, expected.contains(tup));
+ 	}
+ 
+     }
+ 
+     @Test
++    public void testRollupBasic() throws IOException {
++	// basic correctness test
++	String query = "a = load 'input' USING mock.Storage() as (x:chararray,y:chararray,z:long);"
++	        + "b = cube a by rollup(x,y);"
++	        + "c = foreach b generate flatten(group) as (type,location), COUNT_STAR(cube) as count, SUM(cube.z) as total;"
++	        + "store c into 'output' using mock.Storage();";
++	Util.registerMultiLineQuery(pigServer, query);
++
++	Set<Tuple> expected = ImmutableSet.of(
++	        tf.newTuple(Lists.newArrayList("cat", "miami", (long) 1, (long) 18)),
++	        tf.newTuple(Lists.newArrayList("cat", "naples", (long) 1, (long) 9)),
++	        tf.newTuple(Lists.newArrayList("cat", null, (long) 2, (long) 27)),
++	        tf.newTuple(Lists.newArrayList("dog", "miami", (long) 1, (long) 12)),
++	        tf.newTuple(Lists.newArrayList("dog", "tampa", (long) 1, (long) 14)),
++	        tf.newTuple(Lists.newArrayList("dog", "naples", (long) 1, (long) 5)),
++	        tf.newTuple(Lists.newArrayList("dog", null, (long) 3, (long) 31)),
++	        tf.newTuple(Lists.newArrayList("turtle", "tampa", (long) 1, (long) 4)),
++	        tf.newTuple(Lists.newArrayList("turtle", "naples", (long) 1, (long) 1)),
++	        tf.newTuple(Lists.newArrayList("turtle", null, (long) 2, (long) 5)),
++	        tf.newTuple(Lists.newArrayList(null, null, (long) 7, (long) 63)));
++
++	List<Tuple> out = data.get("output");
++	for (Tuple tup : out) {
++	    assertTrue(expected + " contains " + tup, expected.contains(tup));
++	}
++    }
++
++    @Test
++    public void testCubeAndRollup() throws IOException {
++	// basic correctness test
++	String query = "a = load 'input2' USING mock.Storage() as (v:chararray,w:chararray,x:chararray,y:chararray,z:long);"
++	        + "b = cube a by cube(v,w), rollup(x,y);"
++	        + "c = foreach b generate flatten(group) as (type,location,color,category), COUNT_STAR(cube) as count, SUM(cube.z) as total;"
++	        + "store c into 'output' using mock.Storage();";
++	Util.registerMultiLineQuery(pigServer, query);
++
++	Set<Tuple> expected = ImmutableSet
++	        .of(tf.newTuple(Lists.newArrayList("dog", "miami", "white", "pet", (long) 1,
++	                (long) 5)), tf.newTuple(Lists.newArrayList("dog", null, "white", "pet",
++	                (long) 1, (long) 5)), tf.newTuple(Lists.newArrayList(null, "miami",
++	                "white", "pet", (long) 1, (long) 5)), tf.newTuple(Lists.newArrayList(null,
++	                null, "white", "pet", (long) 1, (long) 5)), tf.newTuple(Lists.newArrayList(
++	                "dog", "miami", "white", null, (long) 1, (long) 5)), tf.newTuple(Lists
++	                .newArrayList("dog", null, "white", null, (long) 1, (long) 5)), tf
++	                .newTuple(Lists.newArrayList(null, "miami", "white", null, (long) 1,
++	                        (long) 5)), tf.newTuple(Lists.newArrayList(null, null, "white",
++	                null, (long) 1, (long) 5)), tf.newTuple(Lists.newArrayList("dog", "miami",
++	                null, null, (long) 1, (long) 5)), tf.newTuple(Lists.newArrayList("dog",
++	                null, null, null, (long) 1, (long) 5)), tf.newTuple(Lists.newArrayList(
++	                null, "miami", null, null, (long) 1, (long) 5)), tf.newTuple(Lists
++	                .newArrayList(null, null, null, null, (long) 1, (long) 5)));
++
++	List<Tuple> out = data.get("output");
++	for (Tuple tup : out) {
++	    assertTrue(expected + " contains " + tup, expected.contains(tup));
++	}
++
++    }
++
++    @Test
+     public void testCubeMultipleIAliases() throws IOException {
+ 	// test for input alias to cube being assigned multiple times
+-	String query = 
+-		"a = load 'input' USING mock.Storage() as (x:chararray,y:chararray,z:long);" +
+-			"a = load 'input' USING mock.Storage() as (x,y:chararray,z:long);" +
+-			"a = load 'input' USING mock.Storage() as (x:chararray,y:chararray,z:long);" +
+-			"b = cube a by (x,y);" + 
+-			"c = foreach b generate flatten(group) as (type,location), COUNT_STAR(cube) as count, SUM(cube.z) as total;" +
+-			"store c into 'output' using mock.Storage();";
++	String query = "a = load 'input' USING mock.Storage() as (x:chararray,y:chararray,z:long);"
++	        + "a = load 'input' USING mock.Storage() as (x,y:chararray,z:long);"
++	        + "a = load 'input' USING mock.Storage() as (x:chararray,y:chararray,z:long);"
++	        + "b = cube a by cube(x,y);"
++	        + "c = foreach b generate flatten(group) as (type,location), COUNT_STAR(cube) as count, SUM(cube.z) as total;"
++	        + "store c into 'output' using mock.Storage();";
+ 
+ 	Util.registerMultiLineQuery(pigServer, query);
+ 
+ 	Set<Tuple> expected = ImmutableSet.of(
+-		tf.newTuple(Lists.newArrayList("cat", "miami", (long)1, (long)18)),
+-		tf.newTuple(Lists.newArrayList("cat", "naples", (long)1, (long)9)),
+-		tf.newTuple(Lists.newArrayList("cat", null, (long)2, (long)27)),
+-		tf.newTuple(Lists.newArrayList("dog", "miami", (long)1, (long)12)),
+-		tf.newTuple(Lists.newArrayList("dog", "tampa", (long)1, (long)14)),
+-		tf.newTuple(Lists.newArrayList("dog", "naples", (long)1, (long)5)),
+-		tf.newTuple(Lists.newArrayList("dog", null, (long)3, (long)31)),
+-		tf.newTuple(Lists.newArrayList("turtle", "tampa", (long)1, (long)4)),
+-		tf.newTuple(Lists.newArrayList("turtle", "naples", (long)1, (long)1)),
+-		tf.newTuple(Lists.newArrayList("turtle", null, (long)2, (long)5)),
+-		tf.newTuple(Lists.newArrayList(null, "miami", (long)2, (long)30)),
+-		tf.newTuple(Lists.newArrayList(null, "tampa", (long)2, (long)18)),
+-		tf.newTuple(Lists.newArrayList(null, "naples", (long)3, (long)15)),
+-		tf.newTuple(Lists.newArrayList(null, null, (long)7, (long)63))
+-		);
++	        tf.newTuple(Lists.newArrayList("cat", "miami", (long) 1, (long) 18)),
++	        tf.newTuple(Lists.newArrayList("cat", "naples", (long) 1, (long) 9)),
++	        tf.newTuple(Lists.newArrayList("cat", null, (long) 2, (long) 27)),
++	        tf.newTuple(Lists.newArrayList("dog", "miami", (long) 1, (long) 12)),
++	        tf.newTuple(Lists.newArrayList("dog", "tampa", (long) 1, (long) 14)),
++	        tf.newTuple(Lists.newArrayList("dog", "naples", (long) 1, (long) 5)),
++	        tf.newTuple(Lists.newArrayList("dog", null, (long) 3, (long) 31)),
++	        tf.newTuple(Lists.newArrayList("turtle", "tampa", (long) 1, (long) 4)),
++	        tf.newTuple(Lists.newArrayList("turtle", "naples", (long) 1, (long) 1)),
++	        tf.newTuple(Lists.newArrayList("turtle", null, (long) 2, (long) 5)),
++	        tf.newTuple(Lists.newArrayList(null, "miami", (long) 2, (long) 30)),
++	        tf.newTuple(Lists.newArrayList(null, "tampa", (long) 2, (long) 18)),
++	        tf.newTuple(Lists.newArrayList(null, "naples", (long) 3, (long) 15)),
++	        tf.newTuple(Lists.newArrayList(null, null, (long) 7, (long) 63)));
+ 
+ 	List<Tuple> out = data.get("output");
+-	for( Tuple tup : out ) {
+-	    assertTrue(expected+" contains "+tup, expected.contains(tup));
++	for (Tuple tup : out) {
++	    assertTrue(expected + " contains " + tup, expected.contains(tup));
+ 	}
+ 
+     }
+@@ -167,35 +212,33 @@
+     @Test
+     public void testCubeAfterForeach() throws IOException {
+ 	// test for foreach projection before cube operator
+-	String query = 
+-		"a = load 'input' USING mock.Storage() as (x:chararray,y:chararray,z:long);" +
+-			"b = foreach a generate x as type,y as location,z as number;" +
+-			"c = cube b by (type,location);" + 
+-			"d = foreach c generate flatten(group) as (type,location), COUNT_STAR(cube) as count, SUM(cube.number) as total;" +
+-			"store d into 'output' using mock.Storage();";
++	String query = "a = load 'input' USING mock.Storage() as (x:chararray,y:chararray,z:long);"
++	        + "b = foreach a generate x as type,y as location,z as number;"
++	        + "c = cube b by cube(type,location);"
++	        + "d = foreach c generate flatten(group) as (type,location), COUNT_STAR(cube) as count, SUM(cube.number) as total;"
++	        + "store d into 'output' using mock.Storage();";
+ 
+ 	Util.registerMultiLineQuery(pigServer, query);
+ 
+ 	Set<Tuple> expected = ImmutableSet.of(
+-		tf.newTuple(Lists.newArrayList("cat", "miami", (long)1, (long)18)),
+-		tf.newTuple(Lists.newArrayList("cat", "naples", (long)1, (long)9)),
+-		tf.newTuple(Lists.newArrayList("cat", null, (long)2, (long)27)),
+-		tf.newTuple(Lists.newArrayList("dog", "miami", (long)1, (long)12)),
+-		tf.newTuple(Lists.newArrayList("dog", "tampa", (long)1, (long)14)),
+-		tf.newTuple(Lists.newArrayList("dog", "naples", (long)1, (long)5)),
+-		tf.newTuple(Lists.newArrayList("dog", null, (long)3, (long)31)),
+-		tf.newTuple(Lists.newArrayList("turtle", "tampa", (long)1, (long)4)),
+-		tf.newTuple(Lists.newArrayList("turtle", "naples", (long)1, (long)1)),
+-		tf.newTuple(Lists.newArrayList("turtle", null, (long)2, (long)5)),
+-		tf.newTuple(Lists.newArrayList(null, "miami", (long)2, (long)30)),
+-		tf.newTuple(Lists.newArrayList(null, "tampa", (long)2, (long)18)),
+-		tf.newTuple(Lists.newArrayList(null, "naples", (long)3, (long)15)),
+-		tf.newTuple(Lists.newArrayList(null, null, (long)7, (long)63))
+-		);
++	        tf.newTuple(Lists.newArrayList("cat", "miami", (long) 1, (long) 18)),
++	        tf.newTuple(Lists.newArrayList("cat", "naples", (long) 1, (long) 9)),
++	        tf.newTuple(Lists.newArrayList("cat", null, (long) 2, (long) 27)),
++	        tf.newTuple(Lists.newArrayList("dog", "miami", (long) 1, (long) 12)),
++	        tf.newTuple(Lists.newArrayList("dog", "tampa", (long) 1, (long) 14)),
++	        tf.newTuple(Lists.newArrayList("dog", "naples", (long) 1, (long) 5)),
++	        tf.newTuple(Lists.newArrayList("dog", null, (long) 3, (long) 31)),
++	        tf.newTuple(Lists.newArrayList("turtle", "tampa", (long) 1, (long) 4)),
++	        tf.newTuple(Lists.newArrayList("turtle", "naples", (long) 1, (long) 1)),
++	        tf.newTuple(Lists.newArrayList("turtle", null, (long) 2, (long) 5)),
++	        tf.newTuple(Lists.newArrayList(null, "miami", (long) 2, (long) 30)),
++	        tf.newTuple(Lists.newArrayList(null, "tampa", (long) 2, (long) 18)),
++	        tf.newTuple(Lists.newArrayList(null, "naples", (long) 3, (long) 15)),
++	        tf.newTuple(Lists.newArrayList(null, null, (long) 7, (long) 63)));
+ 
+ 	List<Tuple> out = data.get("output");
+-	for( Tuple tup : out ) {
+-	    assertTrue(expected+" contains "+tup, expected.contains(tup));
++	for (Tuple tup : out) {
++	    assertTrue(expected + " contains " + tup, expected.contains(tup));
+ 	}
+ 
+     }
+@@ -203,27 +246,24 @@
+     @Test
+     public void testCubeAfterLimit() throws IOException {
+ 	// test for limit operator before cube operator
+-	String query = 
+-		"a = load 'input' USING mock.Storage() as (x:chararray,y:chararray,z:long);" +
+-			"b = limit a 2;" +
+-			"c = cube b by (x,y);" + 
+-			"d = foreach c generate flatten(group) as (x,y), SUM(cube.z) as total;" +
+-			"store d into 'output' using mock.Storage();";
++	String query = "a = load 'input' USING mock.Storage() as (x:chararray,y:chararray,z:long);"
++	        + "b = limit a 2;" + "c = cube b by cube(x,y);"
++	        + "d = foreach c generate flatten(group) as (x,y), SUM(cube.z) as total;"
++	        + "store d into 'output' using mock.Storage();";
+ 
+ 	Util.registerMultiLineQuery(pigServer, query);
+ 
+ 	Set<Tuple> expected = ImmutableSet.of(
+-		tf.newTuple(Lists.newArrayList("cat", "miami", (long)18)),
+-		tf.newTuple(Lists.newArrayList("cat", null, (long)18)),
+-		tf.newTuple(Lists.newArrayList("dog", "miami", (long)12)),
+-		tf.newTuple(Lists.newArrayList("dog", null, (long)12)),
+-		tf.newTuple(Lists.newArrayList(null, "miami", (long)30)),
+-		tf.newTuple(Lists.newArrayList(null, null, (long)30))
+-		);
++	        tf.newTuple(Lists.newArrayList("cat", "miami", (long) 18)),
++	        tf.newTuple(Lists.newArrayList("cat", null, (long) 18)),
++	        tf.newTuple(Lists.newArrayList("dog", "miami", (long) 12)),
++	        tf.newTuple(Lists.newArrayList("dog", null, (long) 12)),
++	        tf.newTuple(Lists.newArrayList(null, "miami", (long) 30)),
++	        tf.newTuple(Lists.newArrayList(null, null, (long) 30)));
+ 
+ 	List<Tuple> out = data.get("output");
+-	for( Tuple tup : out ) {
+-	    assertTrue(expected+" contains "+tup, expected.contains(tup));
++	for (Tuple tup : out) {
++	    assertTrue(expected + " contains " + tup, expected.contains(tup));
+ 	}
+ 
+     }
+@@ -231,35 +271,33 @@
+     @Test
+     public void testCubeWithStar() throws IOException {
+ 	// test for * (all) dimensions in cube operator
+-	String query = 
+-		"a = load 'input' USING mock.Storage() as (x:chararray,y:chararray);" +
+-			"b = foreach a generate x as type,y as location;" +
+-			"c = cube b by (*);" + 
+-			"d = foreach c generate flatten(group) as (type,location), COUNT_STAR(cube) as count;" +
+-			"store d into 'output' using mock.Storage();";
++	String query = "a = load 'input' USING mock.Storage() as (x:chararray,y:chararray);"
++	        + "b = foreach a generate x as type,y as location;"
++	        + "c = cube b by cube(*);"
++	        + "d = foreach c generate flatten(group) as (type,location), COUNT_STAR(cube) as count;"
++	        + "store d into 'output' using mock.Storage();";
+ 
+ 	Util.registerMultiLineQuery(pigServer, query);
+ 
+ 	Set<Tuple> expected = ImmutableSet.of(
+-		tf.newTuple(Lists.newArrayList("cat", "miami", (long)1)),
+-		tf.newTuple(Lists.newArrayList("cat", "naples", (long)1)),
+-		tf.newTuple(Lists.newArrayList("cat", null, (long)2)),
+-		tf.newTuple(Lists.newArrayList("dog", "miami", (long)1)),
+-		tf.newTuple(Lists.newArrayList("dog", "tampa", (long)1)),
+-		tf.newTuple(Lists.newArrayList("dog", "naples", (long)1)),
+-		tf.newTuple(Lists.newArrayList("dog", null, (long)3)),
+-		tf.newTuple(Lists.newArrayList("turtle", "tampa", (long)1)),
+-		tf.newTuple(Lists.newArrayList("turtle", "naples", (long)1)),
+-		tf.newTuple(Lists.newArrayList("turtle", null, (long)2)),
+-		tf.newTuple(Lists.newArrayList(null, "miami", (long)2)),
+-		tf.newTuple(Lists.newArrayList(null, "tampa", (long)2)),
+-		tf.newTuple(Lists.newArrayList(null, "naples", (long)3)),
+-		tf.newTuple(Lists.newArrayList(null, null, (long)7))
+-		);
++	        tf.newTuple(Lists.newArrayList("cat", "miami", (long) 1)),
++	        tf.newTuple(Lists.newArrayList("cat", "naples", (long) 1)),
++	        tf.newTuple(Lists.newArrayList("cat", null, (long) 2)),
++	        tf.newTuple(Lists.newArrayList("dog", "miami", (long) 1)),
++	        tf.newTuple(Lists.newArrayList("dog", "tampa", (long) 1)),
++	        tf.newTuple(Lists.newArrayList("dog", "naples", (long) 1)),
++	        tf.newTuple(Lists.newArrayList("dog", null, (long) 3)),
++	        tf.newTuple(Lists.newArrayList("turtle", "tampa", (long) 1)),
++	        tf.newTuple(Lists.newArrayList("turtle", "naples", (long) 1)),
++	        tf.newTuple(Lists.newArrayList("turtle", null, (long) 2)),
++	        tf.newTuple(Lists.newArrayList(null, "miami", (long) 2)),
++	        tf.newTuple(Lists.newArrayList(null, "tampa", (long) 2)),
++	        tf.newTuple(Lists.newArrayList(null, "naples", (long) 3)),
++	        tf.newTuple(Lists.newArrayList(null, null, (long) 7)));
+ 
+ 	List<Tuple> out = data.get("output");
+-	for( Tuple tup : out ) {
+-	    assertTrue(expected+" contains "+tup, expected.contains(tup));
++	for (Tuple tup : out) {
++	    assertTrue(expected + " contains " + tup, expected.contains(tup));
+ 	}
+ 
+     }
+@@ -267,35 +305,33 @@
+     @Test
+     public void testCubeWithRange() throws IOException {
+ 	// test for range projection of dimensions in cube operator
+-	String query = 
+-		"a = load 'input' USING mock.Storage() as (x:chararray,y:chararray,z:long);" +
+-			"b = foreach a generate x as type,y as location, z as number;" +
+-			"c = cube b by ($0..$1);" + 
+-			"d = foreach c generate flatten(group) as (type,location), COUNT_STAR(cube) as count, SUM(cube.number) as total;" +
+-			"store d into 'output' using mock.Storage();";
++	String query = "a = load 'input' USING mock.Storage() as (x:chararray,y:chararray,z:long);"
++	        + "b = foreach a generate x as type,y as location, z as number;"
++	        + "c = cube b by cube($0..$1);"
++	        + "d = foreach c generate flatten(group) as (type,location), COUNT_STAR(cube) as count, SUM(cube.number) as total;"
++	        + "store d into 'output' using mock.Storage();";
+ 
+ 	Util.registerMultiLineQuery(pigServer, query);
+ 
+ 	Set<Tuple> expected = ImmutableSet.of(
+-		tf.newTuple(Lists.newArrayList("cat", "miami", (long)1, (long)18)),
+-		tf.newTuple(Lists.newArrayList("cat", "naples", (long)1, (long)9)),
+-		tf.newTuple(Lists.newArrayList("cat", null, (long)2, (long)27)),
+-		tf.newTuple(Lists.newArrayList("dog", "miami", (long)1, (long)12)),
+-		tf.newTuple(Lists.newArrayList("dog", "tampa", (long)1, (long)14)),
+-		tf.newTuple(Lists.newArrayList("dog", "naples", (long)1, (long)5)),
+-		tf.newTuple(Lists.newArrayList("dog", null, (long)3, (long)31)),
+-		tf.newTuple(Lists.newArrayList("turtle", "tampa", (long)1, (long)4)),
+-		tf.newTuple(Lists.newArrayList("turtle", "naples", (long)1, (long)1)),
+-		tf.newTuple(Lists.newArrayList("turtle", null, (long)2, (long)5)),
+-		tf.newTuple(Lists.newArrayList(null, "miami", (long)2, (long)30)),
+-		tf.newTuple(Lists.newArrayList(null, "tampa", (long)2, (long)18)),
+-		tf.newTuple(Lists.newArrayList(null, "naples", (long)3, (long)15)),
+-		tf.newTuple(Lists.newArrayList(null, null, (long)7, (long)63))
+-		);
++	        tf.newTuple(Lists.newArrayList("cat", "miami", (long) 1, (long) 18)),
++	        tf.newTuple(Lists.newArrayList("cat", "naples", (long) 1, (long) 9)),
++	        tf.newTuple(Lists.newArrayList("cat", null, (long) 2, (long) 27)),
++	        tf.newTuple(Lists.newArrayList("dog", "miami", (long) 1, (long) 12)),
++	        tf.newTuple(Lists.newArrayList("dog", "tampa", (long) 1, (long) 14)),
++	        tf.newTuple(Lists.newArrayList("dog", "naples", (long) 1, (long) 5)),
++	        tf.newTuple(Lists.newArrayList("dog", null, (long) 3, (long) 31)),
++	        tf.newTuple(Lists.newArrayList("turtle", "tampa", (long) 1, (long) 4)),
++	        tf.newTuple(Lists.newArrayList("turtle", "naples", (long) 1, (long) 1)),
++	        tf.newTuple(Lists.newArrayList("turtle", null, (long) 2, (long) 5)),
++	        tf.newTuple(Lists.newArrayList(null, "miami", (long) 2, (long) 30)),
++	        tf.newTuple(Lists.newArrayList(null, "tampa", (long) 2, (long) 18)),
++	        tf.newTuple(Lists.newArrayList(null, "naples", (long) 3, (long) 15)),
++	        tf.newTuple(Lists.newArrayList(null, null, (long) 7, (long) 63)));
+ 
+ 	List<Tuple> out = data.get("output");
+-	for( Tuple tup : out ) {
+-	    assertTrue(expected+" contains "+tup, expected.contains(tup));
++	for (Tuple tup : out) {
++	    assertTrue(expected + " contains " + tup, expected.contains(tup));
+ 	}
+ 
+     }
+@@ -304,10 +340,10 @@
+     public void testCubeDuplicateDimensions() throws IOException {
+ 	// test for cube operator with duplicate dimensions
+ 	String query = "a = load 'input' USING mock.Storage() as (x:chararray,y:chararray,z:long);"
+-		+ "b = foreach a generate x as type,y as location, z as number;"
+-		+ "c = cube b by ($0..$1,$0..$1);"
+-		+ "d = foreach c generate flatten(group), COUNT_STAR(cube) as count, SUM(cube.number) as total;"
+-		+ "store d into 'output' using mock.Storage();";
++	        + "b = foreach a generate x as type,y as location, z as number;"
++	        + "c = cube b by cube($0..$1,$0..$1);"
++	        + "d = foreach c generate flatten(group), COUNT_STAR(cube) as count, SUM(cube.number) as total;"
++	        + "store d into 'output' using mock.Storage();";
+ 
+ 	try {
+ 	    Util.registerMultiLineQuery(pigServer, query);
+@@ -324,30 +360,28 @@
+     @Test
+     public void testCubeAfterFilter() throws IOException {
+ 	// test for filtering before cube operator
+-	String query = 
+-		"a = load 'input' USING mock.Storage() as (x:chararray,y:chararray,z:long);" +
+-			"b = filter a by x == 'dog';" +
+-			"c = cube b by (x,y);" + 
+-			"d = foreach c generate flatten(group), COUNT_STAR(cube) as count, SUM(cube.z) as total;" +
+-			"store d into 'output' using mock.Storage();";
++	String query = "a = load 'input' USING mock.Storage() as (x:chararray,y:chararray,z:long);"
++	        + "b = filter a by x == 'dog';"
++	        + "c = cube b by cube(x,y);"
++	        + "d = foreach c generate flatten(group), COUNT_STAR(cube) as count, SUM(cube.z) as total;"
++	        + "store d into 'output' using mock.Storage();";
+ 
+ 	Util.registerMultiLineQuery(pigServer, query);
+ 	// Iterator<Tuple> it = pigServer.openIterator("d");
+ 
+ 	Set<Tuple> expected = ImmutableSet.of(
+-		tf.newTuple(Lists.newArrayList("dog", "miami", (long)1, (long)12)),
+-		tf.newTuple(Lists.newArrayList("dog", "tampa", (long)1, (long)14)),
+-		tf.newTuple(Lists.newArrayList("dog", "naples", (long)1, (long)5)),
+-		tf.newTuple(Lists.newArrayList("dog", null, (long)3, (long)31)),
+-		tf.newTuple(Lists.newArrayList(null, "miami", (long)1, (long)12)),
+-		tf.newTuple(Lists.newArrayList(null, "tampa", (long)1, (long)14)),
+-		tf.newTuple(Lists.newArrayList(null, "naples", (long)1, (long)5)),
+-		tf.newTuple(Lists.newArrayList(null, null, (long)3, (long)31))
+-		);
++	        tf.newTuple(Lists.newArrayList("dog", "miami", (long) 1, (long) 12)),
++	        tf.newTuple(Lists.newArrayList("dog", "tampa", (long) 1, (long) 14)),
++	        tf.newTuple(Lists.newArrayList("dog", "naples", (long) 1, (long) 5)),
++	        tf.newTuple(Lists.newArrayList("dog", null, (long) 3, (long) 31)),
++	        tf.newTuple(Lists.newArrayList(null, "miami", (long) 1, (long) 12)),
++	        tf.newTuple(Lists.newArrayList(null, "tampa", (long) 1, (long) 14)),
++	        tf.newTuple(Lists.newArrayList(null, "naples", (long) 1, (long) 5)),
++	        tf.newTuple(Lists.newArrayList(null, null, (long) 3, (long) 31)));
+ 
+ 	List<Tuple> out = data.get("output");
+-	for( Tuple tup : out ) {
+-	    assertTrue(expected+" contains "+tup, expected.contains(tup));
++	for (Tuple tup : out) {
++	    assertTrue(expected + " contains " + tup, expected.contains(tup));
+ 	}
+ 
+     }
+@@ -355,165 +389,184 @@
+     @Test
+     public void testCubeAfterOrder() throws IOException {
+ 	// test for ordering before cube operator
+-	String query = 
+-		"a = load 'input' USING mock.Storage() as (x:chararray,y:chararray,z:long);" +
+-			"b = order a by $2;" +
+-			"c = cube b by (x,y);" + 
+-			"d = foreach c generate flatten(group), COUNT_STAR(cube) as count, SUM(cube.z) as total;" +
+-			"store d into 'output' using mock.Storage();";
++	String query = "a = load 'input' USING mock.Storage() as (x:chararray,y:chararray,z:long);"
++	        + "b = order a by $2;"
++	        + "c = cube b by cube(x,y);"
++	        + "d = foreach c generate flatten(group), COUNT_STAR(cube) as count, SUM(cube.z) as total;"
++	        + "store d into 'output' using mock.Storage();";
+ 
+ 	Util.registerMultiLineQuery(pigServer, query);
+ 
+ 	Set<Tuple> expected = ImmutableSet.of(
+-		tf.newTuple(Lists.newArrayList("cat", "miami", (long)1, (long)18)),
+-		tf.newTuple(Lists.newArrayList("cat", "naples", (long)1, (long)9)),
+-		tf.newTuple(Lists.newArrayList("cat", null, (long)2, (long)27)),
+-		tf.newTuple(Lists.newArrayList("dog", "miami", (long)1, (long)12)),
+-		tf.newTuple(Lists.newArrayList("dog", "tampa", (long)1, (long)14)),
+-		tf.newTuple(Lists.newArrayList("dog", "naples", (long)1, (long)5)),
+-		tf.newTuple(Lists.newArrayList("dog", null, (long)3, (long)31)),
+-		tf.newTuple(Lists.newArrayList("turtle", "tampa", (long)1, (long)4)),
+-		tf.newTuple(Lists.newArrayList("turtle", "naples", (long)1, (long)1)),
+-		tf.newTuple(Lists.newArrayList("turtle", null, (long)2, (long)5)),
+-		tf.newTuple(Lists.newArrayList(null, "miami", (long)2, (long)30)),
+-		tf.newTuple(Lists.newArrayList(null, "tampa", (long)2, (long)18)),
+-		tf.newTuple(Lists.newArrayList(null, "naples", (long)3, (long)15)),
+-		tf.newTuple(Lists.newArrayList(null, null, (long)7, (long)63))
+-		);
++	        tf.newTuple(Lists.newArrayList("cat", "miami", (long) 1, (long) 18)),
++	        tf.newTuple(Lists.newArrayList("cat", "naples", (long) 1, (long) 9)),
++	        tf.newTuple(Lists.newArrayList("cat", null, (long) 2, (long) 27)),
++	        tf.newTuple(Lists.newArrayList("dog", "miami", (long) 1, (long) 12)),
++	        tf.newTuple(Lists.newArrayList("dog", "tampa", (long) 1, (long) 14)),
++	        tf.newTuple(Lists.newArrayList("dog", "naples", (long) 1, (long) 5)),
++	        tf.newTuple(Lists.newArrayList("dog", null, (long) 3, (long) 31)),
++	        tf.newTuple(Lists.newArrayList("turtle", "tampa", (long) 1, (long) 4)),
++	        tf.newTuple(Lists.newArrayList("turtle", "naples", (long) 1, (long) 1)),
++	        tf.newTuple(Lists.newArrayList("turtle", null, (long) 2, (long) 5)),
++	        tf.newTuple(Lists.newArrayList(null, "miami", (long) 2, (long) 30)),
++	        tf.newTuple(Lists.newArrayList(null, "tampa", (long) 2, (long) 18)),
++	        tf.newTuple(Lists.newArrayList(null, "naples", (long) 3, (long) 15)),
++	        tf.newTuple(Lists.newArrayList(null, null, (long) 7, (long) 63)));
+ 
+ 	List<Tuple> out = data.get("output");
+-	for( Tuple tup : out ) {
+-	    assertTrue(expected+" contains "+tup, expected.contains(tup));
++	for (Tuple tup : out) {
++	    assertTrue(expected + " contains " + tup, expected.contains(tup));
+ 	}
+     }
+ 
+     @Test
+     public void testCubeAfterJoin() throws IOException {
+ 	// test for cubing on joined relations
+-	String query = 
+-		"a = load 'input1' USING mock.Storage() as (a1:chararray,b1,c1,d1); " +
+-			"b = load 'input' USING mock.Storage() as (a2,b2,c2:long,d2:chararray);" +
+-			"c = join a by a1, b by d2;" +
+-			"d = cube c by ($4,$5);" + 
+-			"e = foreach d generate flatten(group), COUNT_STAR(cube) as count, SUM(cube.c2) as total;" +
+-			"store e into 'output' using mock.Storage();";
++	String query = "a = load 'input1' USING mock.Storage() as (a1:chararray,b1,c1,d1); "
++	        + "b = load 'input' USING mock.Storage() as (a2,b2,c2:long,d2:chararray);"
++	        + "c = join a by a1, b by d2;"
++	        + "d = cube c by cube($4,$5);"
++	        + "e = foreach d generate flatten(group), COUNT_STAR(cube) as count, SUM(cube.c2) as total;"
++	        + "store e into 'output' using mock.Storage();";
+ 
+ 	Util.registerMultiLineQuery(pigServer, query);
+ 
+ 	Set<Tuple> expected = ImmutableSet.of(
+-		tf.newTuple(Lists.newArrayList("cat", "miami", (long)1, (long)18)),
+-		tf.newTuple(Lists.newArrayList("cat", null, (long)1, (long)18)),
+-		tf.newTuple(Lists.newArrayList("dog", "miami", (long)1, (long)12)),
+-		tf.newTuple(Lists.newArrayList("dog", "tampa", (long)1, (long)14)),
+-		tf.newTuple(Lists.newArrayList("dog", null, (long)2, (long)26)),
+-		tf.newTuple(Lists.newArrayList("turtle", "tampa", (long)1, (long)4)),
+-		tf.newTuple(Lists.newArrayList("turtle", "naples", (long)1, (long)1)),
+-		tf.newTuple(Lists.newArrayList("turtle", null, (long)2, (long)5)),
+-		tf.newTuple(Lists.newArrayList(null, "miami", (long)2, (long)30)),
+-		tf.newTuple(Lists.newArrayList(null, "tampa", (long)2, (long)18)),
+-		tf.newTuple(Lists.newArrayList(null, "naples", (long)1, (long)1)),
+-		tf.newTuple(Lists.newArrayList(null, null, (long)5, (long)49))
+-		);
++	        tf.newTuple(Lists.newArrayList("cat", "miami", (long) 1, (long) 18)),
++	        tf.newTuple(Lists.newArrayList("cat", null, (long) 1, (long) 18)),
++	        tf.newTuple(Lists.newArrayList("dog", "miami", (long) 1, (long) 12)),
++	        tf.newTuple(Lists.newArrayList("dog", "tampa", (long) 1, (long) 14)),
++	        tf.newTuple(Lists.newArrayList("dog", null, (long) 2, (long) 26)),
++	        tf.newTuple(Lists.newArrayList("turtle", "tampa", (long) 1, (long) 4)),
++	        tf.newTuple(Lists.newArrayList("turtle", "naples", (long) 1, (long) 1)),
++	        tf.newTuple(Lists.newArrayList("turtle", null, (long) 2, (long) 5)),
++	        tf.newTuple(Lists.newArrayList(null, "miami", (long) 2, (long) 30)),
++	        tf.newTuple(Lists.newArrayList(null, "tampa", (long) 2, (long) 18)),
++	        tf.newTuple(Lists.newArrayList(null, "naples", (long) 1, (long) 1)),
++	        tf.newTuple(Lists.newArrayList(null, null, (long) 5, (long) 49)));
+ 
+ 	List<Tuple> out = data.get("output");
+-	for( Tuple tup : out ) {
+-	    assertTrue(expected+" contains "+tup, expected.contains(tup));
++	for (Tuple tup : out) {
++	    assertTrue(expected + " contains " + tup, expected.contains(tup));
+ 	}
+     }
+ 
+     @Test
+     public void testCubeAfterCogroup() throws IOException {
+ 	// test for cubing on co-grouped relation
+-	String query = 
+-		"a = load 'input1' USING mock.Storage() as (a1:chararray,b1,c1,d1); " +
+-			"b = load 'input' USING mock.Storage() as (a2,b2,c2:long,d2:chararray);" +
+-			"c = cogroup a by a1, b by d2;" +
+-			"d = foreach c generate flatten(a), flatten(b);" +
+-			"e = cube d by (a2,b2);" +
+-			"f = foreach e generate flatten(group), COUNT_STAR(cube) as count, SUM(cube.c2) as total;" +
+-			"store f into 'output' using mock.Storage();";
++	String query = "a = load 'input1' USING mock.Storage() as (a1:chararray,b1,c1,d1); "
++	        + "b = load 'input' USING mock.Storage() as (a2,b2,c2:long,d2:chararray);"
++	        + "c = cogroup a by a1, b by d2;"
++	        + "d = foreach c generate flatten(a), flatten(b);"
++	        + "e = cube d by cube(a2,b2);"
++	        + "f = foreach e generate flatten(group), COUNT_STAR(cube) as count, SUM(cube.c2) as total;"
++	        + "store f into 'output' using mock.Storage();";
+ 
+ 	Util.registerMultiLineQuery(pigServer, query);
+ 
+ 	Set<Tuple> expected = ImmutableSet.of(
+-		tf.newTuple(Lists.newArrayList("cat", "miami", (long)1, (long)18)),
+-		tf.newTuple(Lists.newArrayList("cat", null, (long)1, (long)18)),
+-		tf.newTuple(Lists.newArrayList("dog", "miami", (long)1, (long)12)),
+-		tf.newTuple(Lists.newArrayList("dog", "tampa", (long)1, (long)14)),
+-		tf.newTuple(Lists.newArrayList("dog", null, (long)2, (long)26)),
+-		tf.newTuple(Lists.newArrayList("turtle", "tampa", (long)1, (long)4)),
+-		tf.newTuple(Lists.newArrayList("turtle", "naples", (long)1, (long)1)),
+-		tf.newTuple(Lists.newArrayList("turtle", null, (long)2, (long)5)),
+-		tf.newTuple(Lists.newArrayList(null, "miami", (long)2, (long)30)),
+-		tf.newTuple(Lists.newArrayList(null, "tampa", (long)2, (long)18)),
+-		tf.newTuple(Lists.newArrayList(null, "naples", (long)1, (long)1)),
+-		tf.newTuple(Lists.newArrayList(null, null, (long)5, (long)49))
+-		);
++	        tf.newTuple(Lists.newArrayList("cat", "miami", (long) 1, (long) 18)),
++	        tf.newTuple(Lists.newArrayList("cat", null, (long) 1, (long) 18)),
++	        tf.newTuple(Lists.newArrayList("dog", "miami", (long) 1, (long) 12)),
++	        tf.newTuple(Lists.newArrayList("dog", "tampa", (long) 1, (long) 14)),
++	        tf.newTuple(Lists.newArrayList("dog", null, (long) 2, (long) 26)),
++	        tf.newTuple(Lists.newArrayList("turtle", "tampa", (long) 1, (long) 4)),
++	        tf.newTuple(Lists.newArrayList("turtle", "naples", (long) 1, (long) 1)),
++	        tf.newTuple(Lists.newArrayList("turtle", null, (long) 2, (long) 5)),
++	        tf.newTuple(Lists.newArrayList(null, "miami", (long) 2, (long) 30)),
++	        tf.newTuple(Lists.newArrayList(null, "tampa", (long) 2, (long) 18)),
++	        tf.newTuple(Lists.newArrayList(null, "naples", (long) 1, (long) 1)),
++	        tf.newTuple(Lists.newArrayList(null, null, (long) 5, (long) 49)));
+ 
+ 	List<Tuple> out = data.get("output");
+-	for( Tuple tup : out ) {
+-	    assertTrue(expected+" contains "+tup, expected.contains(tup));
++	for (Tuple tup : out) {
++	    assertTrue(expected + " contains " + tup, expected.contains(tup));
+ 	}
+     }
+ 
+     @Test
+     public void testCubeWithNULLs() throws IOException {
+ 	// test for dimension values with legitimate null values
+-	String query = 
+-		"a = load 'input3' USING mock.Storage() as (x:chararray,y:chararray,z:long);" +
+-			"b = cube a by (x,y);" + 
+-			"c = foreach b generate flatten(group) as (type,location), SUM(cube.z) as total;" +
+-			"store c into 'output' using mock.Storage();";
++	String query = "a = load 'input3' USING mock.Storage() as (x:chararray,y:chararray,z:long);"
++	        + "b = cube a by cube(x,y);"
++	        + "c = foreach b generate flatten(group) as (type,location), SUM(cube.z) as total;"
++	        + "store c into 'output' using mock.Storage();";
+ 
+ 	Util.registerMultiLineQuery(pigServer, query);
+ 
+ 	Set<Tuple> expected = ImmutableSet.of(
+-		tf.newTuple(Lists.newArrayList("dog", "miami", (long)12)),
+-		tf.newTuple(Lists.newArrayList("dog", null, (long)12)),
+-		tf.newTuple(Lists.newArrayList(null, "miami", (long)30)),
+-		tf.newTuple(Lists.newArrayList(null, null, (long)30)),
+-		tf.newTuple(Lists.newArrayList("unknown", "miami", (long)18)),
+-		tf.newTuple(Lists.newArrayList("unknown", null, (long)18))
+-		);
++	        tf.newTuple(Lists.newArrayList("dog", "miami", (long) 12)),
++	        tf.newTuple(Lists.newArrayList("dog", null, (long) 12)),
++	        tf.newTuple(Lists.newArrayList(null, "miami", (long) 30)),
++	        tf.newTuple(Lists.newArrayList(null, null, (long) 30)),
++	        tf.newTuple(Lists.newArrayList("unknown", "miami", (long) 18)),
++	        tf.newTuple(Lists.newArrayList("unknown", null, (long) 18)));
+ 
+ 	List<Tuple> out = data.get("output");
+-	for( Tuple tup : out ) {
+-	    assertTrue(expected+" contains "+tup, expected.contains(tup));
++	for (Tuple tup : out) {
++	    assertTrue(expected + " contains " + tup, expected.contains(tup));
+ 	}
+ 
+     }
+-    
++
+     @Test
+     public void testCubeWithNULLAndFilter() throws IOException {
+ 	// test for dimension values with legitimate null values
+ 	// followed by filter
+-	String query = 
+-		"a = load 'input3' USING mock.Storage() as (x:chararray,y:chararray,z:long);" +
+-			"b = cube a by (x,y);" + 
+-			"c = foreach b generate flatten(group) as (type,location), SUM(cube.z) as total;" +
+-			"d = filter c by type!='unknown';" +
+-			"store d into 'output' using mock.Storage();";
++	String query = "a = load 'input3' USING mock.Storage() as (x:chararray,y:chararray,z:long);"
++	        + "b = cube a by cube(x,y);"
++	        + "c = foreach b generate flatten(group) as (type,location), SUM(cube.z) as total;"
++	        + "d = filter c by type!='unknown';"
++	        + "store d into 'output' using mock.Storage();";
+ 
+ 	Util.registerMultiLineQuery(pigServer, query);
+ 
+ 	Set<Tuple> expected = ImmutableSet.of(
+-		tf.newTuple(Lists.newArrayList("dog", "miami", (long)12)),
+-		tf.newTuple(Lists.newArrayList("dog", null, (long)12))
+-		);
++	        tf.newTuple(Lists.newArrayList("dog", "miami", (long) 12)),
++	        tf.newTuple(Lists.newArrayList("dog", null, (long) 12)));
+ 
+ 	List<Tuple> out = data.get("output");
+-	for( Tuple tup : out ) {
+-	    assertTrue(expected+" contains "+tup, expected.contains(tup));
++	for (Tuple tup : out) {
++	    assertTrue(expected + " contains " + tup, expected.contains(tup));
+ 	}
+ 
+     }
+ 
+     @Test
++    public void testRollupAfterCogroup() throws IOException {
++	// test for cubing on co-grouped relation
++	String query = "a = load 'input1' USING mock.Storage() as (a1:chararray,b1,c1,d1); "
++	        + "b = load 'input' USING mock.Storage() as (a2,b2,c2:long,d2:chararray);"
++	        + "c = cogroup a by a1, b by d2;"
++	        + "d = foreach c generate flatten(a), flatten(b);"
++	        + "e = cube d by rollup(a2,b2);"
++	        + "f = foreach e generate flatten(group), COUNT(cube) as count, SUM(cube.c2) as total;"
++	        + "store f into 'output' using mock.Storage();";
++
++	Util.registerMultiLineQuery(pigServer, query);
++
++	Set<Tuple> expected = ImmutableSet.of(
++	        tf.newTuple(Lists.newArrayList("cat", "miami", (long) 1, (long) 18)),
++	        tf.newTuple(Lists.newArrayList("cat", null, (long) 1, (long) 18)),
++	        tf.newTuple(Lists.newArrayList("dog", "miami", (long) 1, (long) 12)),
++	        tf.newTuple(Lists.newArrayList("dog", "tampa", (long) 1, (long) 14)),
++	        tf.newTuple(Lists.newArrayList("dog", null, (long) 2, (long) 26)),
++	        tf.newTuple(Lists.newArrayList("turtle", "tampa", (long) 1, (long) 4)),
++	        tf.newTuple(Lists.newArrayList("turtle", "naples", (long) 1, (long) 1)),
++	        tf.newTuple(Lists.newArrayList("turtle", null, (long) 2, (long) 5)),
++	        tf.newTuple(Lists.newArrayList(null, null, (long) 5, (long) 49)));
++
++	List<Tuple> out = data.get("output");
++	for (Tuple tup : out) {
++	    assertTrue(expected + " contains " + tup, expected.contains(tup));
++	}
++    }
++
++    @Test
+     public void testIllustrate() throws IOException {
+ 	// test for illustrate
+-	String query = 
+-		"a = load 'input' USING mock.Storage() as (a1:chararray,b1:chararray,c1:long); " +
+-			"b = cube a by (a1,b1);";
++	String query = "a = load 'input' USING mock.Storage() as (a1:chararray,b1:chararray,c1:long); "
++	        + "b = cube a by cube(a1,b1);";
+ 
+ 	Util.registerMultiLineQuery(pigServer, query);
+ 	Map<Operator, DataBag> examples = pigServer.getExamples("b");
+@@ -521,11 +574,10 @@
+     }
+ 
+     @Test
+-    public void testExplain() throws IOException {
++    public void testExplainCube() throws IOException {
+ 	// test for explain
+-	String query = 
+-		"a = load 'input' USING mock.Storage() as (a1:chararray,b1:chararray,c1:long); " +
+-			"b = cube a by (a1,b1);";
++	String query = "a = load 'input' USING mock.Storage() as (a1:chararray,b1:chararray,c1:long); "
++	        + "b = cube a by cube(a1,b1);";
+ 
+ 	Util.registerMultiLineQuery(pigServer, query);
+ 	ByteArrayOutputStream baos = new ByteArrayOutputStream();
+@@ -535,16 +587,28 @@
+     }
+ 
+     @Test
++    public void testExplainRollup() throws IOException {
++	// test for explain
++	String query = "a = load 'input' USING mock.Storage() as (a1:chararray,b1:chararray,c1:long); "
++	        + "b = cube a by rollup(a1,b1);";
++
++	Util.registerMultiLineQuery(pigServer, query);
++	ByteArrayOutputStream baos = new ByteArrayOutputStream();
++	PrintStream ps = new PrintStream(baos);
++	pigServer.explain("b", ps);
++	assertTrue(baos.toString().contains("RollupDimensions"));
++    }
++
++    @Test
+     public void testDescribe() throws IOException {
+ 	// test for describe
+-	String query = 
+-		"a = load 'input' USING mock.Storage() as (a1:chararray,b1:chararray,c1:long); " +
+-			"b = cube a by (a1,b1);";
++	String query = "a = load 'input' USING mock.Storage() as (a1:chararray,b1:chararray,c1:long); "
++	        + "b = cube a by cube(a1,b1);";
+ 
+ 	Util.registerMultiLineQuery(pigServer, query);
+ 	Schema sch = pigServer.dumpSchema("b");
+-	for(String alias : sch.getAliases()) {
+-	    if(alias.compareTo("cube") == 0) {
++	for (String alias : sch.getAliases()) {
++	    if (alias.compareTo("cube") == 0) {
+ 		assertTrue(alias.contains("cube"));
+ 	    }
+ 	}
+Index: test/org/apache/pig/test/TestRollupDimensions.java
+===================================================================
+--- test/org/apache/pig/test/TestRollupDimensions.java	(revision 0)
++++ test/org/apache/pig/test/TestRollupDimensions.java	(revision 0)
+@@ -0,0 +1,57 @@
++/*
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.apache.pig.test;
++
++import static org.junit.Assert.assertEquals;
++import static org.junit.Assert.assertTrue;
++
++import java.io.IOException;
++import java.util.Set;
++
++import org.apache.pig.builtin.RollupDimensions;
++import org.apache.pig.data.DataBag;
++import org.apache.pig.data.Tuple;
++import org.apache.pig.data.TupleFactory;
++import org.junit.Test;
++
++import com.google.common.collect.ImmutableList;
++import com.google.common.collect.ImmutableSet;
++
++public class TestRollupDimensions {
++
++    private static TupleFactory TF = TupleFactory.getInstance();
++
++    @Test
++    public void testCube() throws IOException {
++	Tuple t = TF.newTuple(ImmutableList.of("a", "b", "c"));
++	Set<Tuple> expected = ImmutableSet.of(
++		TF.newTuple(ImmutableList.of("a", "b", "c")),
++		TF.newTuple(ImmutableList.of("a", "b", "NULL")),
++		TF.newTuple(ImmutableList.of("a", "NULL", "NULL")),
++		TF.newTuple(ImmutableList.of("NULL", "NULL", "NULL"))
++		);
++
++	RollupDimensions rd = new RollupDimensions("NULL");
++	DataBag bag = rd.exec(t);
++	assertEquals(bag.size(), expected.size());
++
++	for (Tuple tup : bag) {
++	    assertTrue(expected.contains(tup));
++	}
++    }
++}
+Index: test/org/apache/pig/parser/TestQueryLexer.java
+===================================================================
+--- test/org/apache/pig/parser/TestQueryLexer.java	(revision 1360329)
++++ test/org/apache/pig/parser/TestQueryLexer.java	(working copy)
+@@ -48,7 +48,7 @@
+         
+         // While we can check more conditions, such as type of each token, for now I think the following
+         // is enough. If the token type is wrong, it will be most likely caught by the parser.
+-        Assert.assertEquals( 415, tokenCount );
++        Assert.assertEquals( 419, tokenCount );
+         Assert.assertEquals( 0, lexer.getNumberOfSyntaxErrors() );
+     }
+     
+Index: test/org/apache/pig/parser/TestLexer.pig
+===================================================================
+--- test/org/apache/pig/parser/TestLexer.pig	(revision 1360329)
++++ test/org/apache/pig/parser/TestLexer.pig	(working copy)
+@@ -62,7 +62,7 @@
+ 
+ I = foreach A generate flatten(B::c);
+ 
+-J = CUBE A BY ($0, $1, $2, $3);
++J = CUBE A BY CUBE($0, $1), ROLLUP($2, $3);
+ 
+ CMD = `ls -l`;
+ A = stream through CMD;
+Index: test/org/apache/pig/parser/TestQueryParser.java
+===================================================================
+--- test/org/apache/pig/parser/TestQueryParser.java	(revision 1360329)
++++ test/org/apache/pig/parser/TestQueryParser.java	(working copy)
+@@ -62,27 +62,27 @@
+         shouldPass("A = load 'x'; B=A;");
+     }
+     
+-    @Test
++    @Test(expected=RecognitionException.class)
+     public void testNegative2() throws IOException, RecognitionException {
+         shouldFail("A = load 'x'; B=(A);");
+     }
+ 
+-    @Test
++    @Test(expected=RecognitionException.class)
+     public void testNegative3() throws IOException, RecognitionException {
+         shouldFail("A = load 'x';B = (A) as (a:int, b:long);");
+     }
+ 
+-    @Test
++    @Test(expected=RecognitionException.class)
+     public void testNegative4() throws IOException, RecognitionException {
+         shouldFail("A = load 'x'; B = ( filter A by $0 == 0 ) as (a:bytearray, b:long);");
+     }
+     
+-    @Test
++    @Test(expected=RecognitionException.class)
+     public void testNegative5() throws IOException, RecognitionException {
+         shouldFail("A = load 'x'; D = group A by $0:long;");
+     }
+     
+-    @Test
++    @Test(expected=RecognitionException.class)
+     public void testNegative6() throws IOException, RecognitionException {
+         shouldFail("A = load '/Users/gates/test/data/studenttab10'; B = foreach A generate $0, 3.0e10.1;");
+     }
+@@ -177,7 +177,7 @@
+         shouldPass( query );
+     }
+     
+-    @Test
++    @Test(expected=RecognitionException.class)
+     public void testCubeNegative1() throws IOException, RecognitionException {
+ 	// cube keyword used as alias
+     	String query = "x = load 'cubedata' as (a, b, c, d); " +
+@@ -185,7 +185,7 @@
+     	shouldFail( query );
+     }
+     
+-    @Test
++    @Test(expected=RecognitionException.class)
+     public void testCubeNegative2() throws IOException, RecognitionException {
+ 	// syntax error - brackets missing
+     	String query = "x = load 'cubedata' as (a, b, c, d); " +
+@@ -193,7 +193,7 @@
+     	shouldFail( query );
+     }
+     
+-    @Test
++    @Test(expected=RecognitionException.class)
+     public void testCubeNegative3() throws IOException, RecognitionException {
+ 	// syntax error - BY missing
+     	String query = "x = load 'cubedata' as (a, b, c, d); " +
+@@ -201,7 +201,7 @@
+     	shouldFail( query );
+     }
+     
+-    @Test
++    @Test(expected=RecognitionException.class)
+     public void testCubeNegative4() throws IOException, RecognitionException {
+ 	// syntax error - UDF at the end 
+     	String query = "x = load 'cubedata' as (a, b, c, d); " +
+@@ -209,11 +209,27 @@
+     	shouldFail( query );
+     }
+     
++    @Test(expected=RecognitionException.class)
++    public void testCubeNegative5() throws IOException, RecognitionException {
++	// syntax error - specifying just dimensions 
++    	String query = "x = load 'cubedata' as (a, b, c, d); " +
++    				   "y = cube x by (a, b, c), CUBE(c);";
++    	shouldFail( query );
++    }
++    
++    @Test(expected=RecognitionException.class)
++    public void testCubeNegative6() throws IOException, RecognitionException {
++	// syntax error - dangling dimension 
++    	String query = "x = load 'cubedata' as (a, b, c, d); " +
++    				   "y = cube x by CUBE(a, b, c), y, ROLLUP(c);";
++    	shouldFail( query );
++    }
++    
+     @Test
+     public void testCubePositive1() throws IOException, RecognitionException {
+ 	// syntactically correct
+     	String query = "x = load 'cubedata' as (a, b, c, d);" + 
+-    				   "y = cube x by (a, b, c);" +
++    				   "y = cube x by cube(a, b, c);" +
+     				   "z = foreach y generate flatten(group) as (a, b, c), COUNT(x) as count;" +
+     				   "store z into 'cube_output';";
+     	shouldPass( query );
+@@ -223,7 +239,7 @@
+     public void testCubePositive2() throws IOException, RecognitionException {
+ 	// all columns using *
+     	String query = "x = load 'cubedata' as (a, b, c, d);" + 
+-    				   "y = cube x by (*);" +
++    				   "y = cube x by rollup(*), rollup($2..$3);" +
+     				   "z = foreach y generate flatten(group) as (a, b, c, d), COUNT(x) as count;" +
+     				   "store z into 'cube_output';";
+     	shouldPass( query );
+@@ -234,7 +250,7 @@
+     public void testCubePositive3() throws IOException, RecognitionException {
+ 	// range projection
+     	String query = "x = load 'cubedata' as (a, b, c, d);" + 
+-    				   "y = cube x by ($0, $1);" +
++    				   "y = cube x by cube($0, $1);" +
+     				   "z = foreach y generate flatten(group) as (a, b), COUNT(x) as count;" +
+     				   "store z into 'cube_output';";
+     	shouldPass( query );
+@@ -371,12 +387,7 @@
+ 
+     private void shouldFail(String query) throws RecognitionException, IOException {
+         System.out.println("Testing: " + query);
+-        try {
+-            parse( query );
+-        } catch(Exception ex) {
+-            return;
+-        }
+-        Assert.fail( query + " should have failed" );
++        parse( query );
+     }
+     
+     private int parse(String query) throws IOException, RecognitionException  {
+Index: test/org/apache/pig/parser/TestParser.pig
+===================================================================
+--- test/org/apache/pig/parser/TestParser.pig	(revision 1360329)
++++ test/org/apache/pig/parser/TestParser.pig	(working copy)
+@@ -66,8 +66,8 @@
+ B = GROUP A ALL using 'collected';
+ 
+ --cube
+-C = CUBE A BY (a, b);
+-CC = CUBE A BY (*);
++C = CUBE A BY CUBE(a, b);
++CC = CUBE A BY ROLLUP(*);
+ 
+ --join
+ E = join A by $0, B by $0 using 'replicated';
+Index: test/org/apache/pig/parser/TestLogicalPlanGenerator.java
+===================================================================
+--- test/org/apache/pig/parser/TestLogicalPlanGenerator.java	(revision 1360329)
++++ test/org/apache/pig/parser/TestLogicalPlanGenerator.java	(working copy)
+@@ -301,7 +301,7 @@
+     @Test
+     public void testCubeBasic() {
+ 	String query = "a = load 'input' as (x:chararray,y:chararray,z:long);"
+-	        + "b = cube a by (x,y);"
++	        + "b = cube a by cube(x,y);"
+ 	        + "c = foreach b generate flatten(group) as (x,y), COUNT(cube) as count, SUM(cube.z) as total;"
+ 	        + "store c into 'output';";
+ 	generateLogicalPlan(query);
+@@ -312,7 +312,7 @@
+ 	String query = "a = load 'input' as (x:chararray,y:chararray,z:long);"
+ 	        + "a = load 'input' as (x,y:chararray,z:long);"
+ 	        + "a = load 'input' as (x:chararray,y:chararray,z:long);"
+-	        + "b = cube a by (x,y);"
++	        + "b = cube a by rollup(x,y);"
+ 	        + "c = foreach b generate flatten(group) as (x,y), COUNT(cube) as count, SUM(cube.z) as total;"
+ 	        + "store c into 'c';";
+ 	generateLogicalPlan(query);
+@@ -322,7 +322,7 @@
+     public void testCubeAfterForeach() {
+ 	String query = "a = load 'input' as (x:chararray,y:chararray,z:long);"
+ 	        + "b = foreach a generate x as type,y as location,z as number;"
+-	        + "c = cube b by (type,location);"
++	        + "c = cube b by cube(type,location);"
+ 	        + "d = foreach c generate flatten(group) as (type,location), COUNT(cube) as count, SUM(cube.number) as total;"
+ 	        + "store d into 'd';";
+ 	generateLogicalPlan(query);
+Index: src/org/apache/pig/parser/AstPrinter.g
+===================================================================
+--- src/org/apache/pig/parser/AstPrinter.g	(revision 1360329)
++++ src/org/apache/pig/parser/AstPrinter.g	(working copy)
+@@ -206,18 +206,29 @@
+ ;
+ 
+ cube_clause
+-  : ^( CUBE { sb.append($CUBE.text).append(" "); } cube_item )
++    : ^( CUBE { sb.append($CUBE.text).append(" "); } cube_item )
+ ;
+ 
+ cube_item
+-  : rel ( cube_by_clause )
++    : rel ( cube_by_clause )
+ ;
+ 
+ cube_by_clause
+-    : ^( BY { sb.append(" ").append($BY.text).append(" ("); } 
+-    cube_by_expr ( { sb.append(", "); } cube_by_expr )* { sb.append(")"); } )
++    : ^( BY { sb.append(" ").append($BY.text); } cube_or_rollup )
+ ;
+ 
++cube_or_rollup
++    : cube_rollup_list ( { sb.append(", "); } cube_rollup_list )* 
++;
++
++cube_rollup_list
++    : ^( ( CUBE { sb.append($CUBE.text).append("("); } | ROLLUP { sb.append($ROLLUP.text).append("("); } ) cube_by_expr_list { sb.append(")"); }) 
++;
++
++cube_by_expr_list
++    : ( cube_by_expr ( { sb.append(", "); } cube_by_expr )* )
++;
++
+ cube_by_expr 
+     : col_range | expr | STAR { sb.append($STAR.text); }
+ ;
+@@ -574,6 +585,7 @@
+     | FILTER    { sb.append($FILTER.text); }
+     | FOREACH   { sb.append($FOREACH.text); }
+     | CUBE      { sb.append($CUBE.text); }
++    | ROLLUP    { sb.append($ROLLUP.text); }
+     | MATCHES   { sb.append($MATCHES.text); }
+     | ORDER     { sb.append($ORDER.text); }
+     | DISTINCT  { sb.append($DISTINCT.text); }
+Index: src/org/apache/pig/parser/AliasMasker.g
+===================================================================
+--- src/org/apache/pig/parser/AliasMasker.g	(revision 1360329)
++++ src/org/apache/pig/parser/AliasMasker.g	(working copy)
+@@ -238,17 +238,29 @@
+ ;
+ 
+ cube_clause
+-  : ^( CUBE cube_item )
++    : ^( CUBE cube_item )
+ ;
+ 
+ cube_item
+-  : rel ( cube_by_clause )
++    : rel ( cube_by_clause )
+ ;
+ 
+ cube_by_clause
+-    : ^( BY cube_by_expr+ )
++    : ^( BY cube_or_rollup )
+ ;
+ 
++cube_or_rollup
++    : cube_rollup_list+
++;
++
++cube_rollup_list
++    : ^( ( CUBE | ROLLUP ) cube_by_expr_list )
++;
++
++cube_by_expr_list
++    : cube_by_expr+
++;
++
+ cube_by_expr 
+     : col_range | expr | STAR 
+ ;
+@@ -591,6 +603,7 @@
+     | FILTER
+     | FOREACH
+     | CUBE
++    | ROLLUP
+     | MATCHES
+     | ORDER
+     | DISTINCT
+Index: src/org/apache/pig/parser/LogicalPlanGenerator.g
+===================================================================
+--- src/org/apache/pig/parser/LogicalPlanGenerator.g	(revision 1360329)
++++ src/org/apache/pig/parser/LogicalPlanGenerator.g	(working copy)
+@@ -467,52 +467,76 @@
+ ;
+ 
+ // Sets the current operator as CUBE and creates LogicalExpressionPlans based on the user input.
+-// Ex: a = CUBE inp BY (x,y);
+-// For the above example this grammar creates LogicalExpressionPlan with ProjectExpression for x and y dimensions.
+-// inputIndex keeps track of input dataset (which will be useful when cubing is performed over multiple datasets).
++// Ex: x = CUBE inp BY CUBE(a,b), ROLLUP(c,d);
++// For the above example this grammar creates LogicalExpressionPlan with ProjectExpression for a,b and c,d dimensions.
++// It also outputs the order of operations i.e in this case CUBE operation followed by ROLLUP operation
+ // These inputs are passed to buildCubeOp methods which then builds the logical plan for CUBE operator.
+ // If user specifies STAR or RANGE expression for dimensions then it will be expanded inside buildCubeOp.
+ cube_clause returns[String alias]
+ scope {
+-  LOCube cubeOp;
+-  MultiMap<Integer, LogicalExpressionPlan> cubePlans;
+-  int inputIndex;
++    LOCube cubeOp;
++    MultiMap<Integer, LogicalExpressionPlan> cubePlans;
++    List<String> operations;
++    int inputIndex;
+ }
+ scope GScope;
+ @init {
+-  $cube_clause::cubeOp = builder.createCubeOp();
+-  $GScope::currentOp = $cube_clause::cubeOp;
+-  $cube_clause::cubePlans = new MultiMap<Integer, LogicalExpressionPlan>();
+-  int oldStatementIndex = $statement::inputIndex;
++    $cube_clause::cubeOp = builder.createCubeOp();
++    $GScope::currentOp = $cube_clause::cubeOp;
++    $cube_clause::cubePlans = new MultiMap<Integer, LogicalExpressionPlan>();
++    $cube_clause::operations = new ArrayList<String>();
+ }
+-@after { $statement::inputIndex = oldStatementIndex; }
+  : ^( CUBE cube_item )
+- {
+-  SourceLocation loc = new SourceLocation( (PigParserNode)$cube_clause.start );
+-  $alias = builder.buildCubeOp( loc, $cube_clause::cubeOp, $statement::alias, 
+-    $statement::inputAlias, $cube_clause::cubePlans );
+- }
++   {
++       SourceLocation loc = new SourceLocation( (PigParserNode)$cube_clause.start );
++       $alias = builder.buildCubeOp( loc, $cube_clause::cubeOp, $statement::alias, 
++       $statement::inputAlias, $cube_clause::operations, $cube_clause::cubePlans );
++   }
+ ;
+ 
+ cube_item
+  : rel ( cube_by_clause 
+-     { 
+-            $cube_clause::cubePlans.put( $cube_clause::inputIndex, $cube_by_clause.plans );
+-     }
+-  )
+-  {
+-     $cube_clause::inputIndex++;
+-     $statement::inputIndex++;  
+-  }
++   { 
++       $cube_clause::cubePlans = $cube_by_clause.plans;
++       $cube_clause::operations = $cube_by_clause.operations;
++   } )
+ ;
+ 
+-cube_by_clause returns[List<LogicalExpressionPlan> plans]
++cube_by_clause returns[List<String> operations, MultiMap<Integer, LogicalExpressionPlan> plans]
+ @init {
++    $operations = new ArrayList<String>();
++    $plans = new MultiMap<Integer, LogicalExpressionPlan>();
++}
++ : ^( BY cube_or_rollup { $operations = $cube_or_rollup.operations; $plans = $cube_or_rollup.plans; })
++;
++
++cube_or_rollup returns[List<String> operations, MultiMap<Integer, LogicalExpressionPlan> plans]
++@init {
++    $operations = new ArrayList<String>();
++    $plans = new MultiMap<Integer, LogicalExpressionPlan>();
++}
++ : ( cube_rollup_list 
++   { 
++       $operations.add($cube_rollup_list.operation); 
++       $plans.put( $cube_clause::inputIndex, $cube_rollup_list.plans); 
++       $cube_clause::inputIndex++;
++   } )+
++;
++
++cube_rollup_list returns[String operation, List<LogicalExpressionPlan> plans]
++@init {
+     $plans = new ArrayList<LogicalExpressionPlan>();
+ }
+- : ^( BY ( cube_by_expr { $plans.add( $cube_by_expr.plan ); } )+ )
++ : ^( ( CUBE { $operation = "CUBE"; } | ROLLUP { $operation = "ROLLUP"; } ) cube_by_expr_list { $plans = $cube_by_expr_list.plans; } ) 
+ ;
+ 
++cube_by_expr_list returns[List<LogicalExpressionPlan> plans]
++@init {
++    $plans = new ArrayList<LogicalExpressionPlan>();
++}
++ : ( cube_by_expr { $plans.add( $cube_by_expr.plan ); } )+
++;
++
+ cube_by_expr returns[LogicalExpressionPlan plan]
+ @init {
+     $plan = new LogicalExpressionPlan();
+@@ -521,12 +545,10 @@
+  | expr[$plan]
+  | STAR 
+    {
+-       builder.buildProjectExpr( new SourceLocation( (PigParserNode)$STAR ), $plan, $GScope::currentOp, 
+-           $statement::inputIndex, null, -1 );
++       builder.buildProjectExpr( new SourceLocation( (PigParserNode)$STAR ), $plan, $GScope::currentOp, 0, null, -1 );
+    }
+ ;
+ 
+-
+ group_clause returns[String alias]
+ scope {
+     MultiMap<Integer, LogicalExpressionPlan> groupPlans;
+@@ -1681,6 +1703,8 @@
+     | ORDER { $id = $ORDER.text; }
+     | DISTINCT { $id = $DISTINCT.text; }
+     | COGROUP { $id = $COGROUP.text; }
++    | CUBE { $id = $CUBE.text; }
++    | ROLLUP { $id = $ROLLUP.text; }
+     | JOIN { $id = $JOIN.text; }
+     | CROSS { $id = $CROSS.text; }
+     | UNION { $id = $UNION.text; }
+Index: src/org/apache/pig/parser/AstValidator.g
+===================================================================
+--- src/org/apache/pig/parser/AstValidator.g	(revision 1360329)
++++ src/org/apache/pig/parser/AstValidator.g	(working copy)
+@@ -257,19 +257,31 @@
+ ;
+ 
+ cube_clause
+-  : ^( CUBE cube_item )
++ : ^( CUBE cube_item )
+ ;
+ 
+ cube_item
+-  : rel ( cube_by_clause )
++ : rel ( cube_by_clause )
+ ;
+ 
+ cube_by_clause
+-    : ^( BY cube_by_expr+ )
++ : ^( BY cube_or_rollup )
+ ;
+ 
++cube_or_rollup
++ : cube_rollup_list+
++;
++
++cube_rollup_list
++ : ^( ( CUBE | ROLLUP ) cube_by_expr_list )
++;
++
++cube_by_expr_list
++ : cube_by_expr+
++;
++
+ cube_by_expr 
+-    : col_range | expr | STAR 
++ : col_range | expr | STAR 
+ ;
+ 
+ group_clause
+@@ -583,6 +595,7 @@
+     | FILTER
+     | FOREACH
+     | CUBE
++    | ROLLUP
+     | MATCHES
+     | ORDER
+     | DISTINCT
+Index: src/org/apache/pig/parser/QueryLexer.g
+===================================================================
+--- src/org/apache/pig/parser/QueryLexer.g	(revision 1360329)
++++ src/org/apache/pig/parser/QueryLexer.g	(working copy)
+@@ -84,6 +84,9 @@
+ CUBE    : 'CUBE'
+ ;
+ 
++ROLLUP	: 'ROLLUP'
++;
++
+ DISTINCT : 'DISTINCT'
+ ;
+ 
+Index: src/org/apache/pig/parser/QueryParser.g
+===================================================================
+--- src/org/apache/pig/parser/QueryParser.g	(revision 1360329)
++++ src/org/apache/pig/parser/QueryParser.g	(working copy)
+@@ -584,12 +584,18 @@
+ cube_item : rel ( cube_by_clause )
+ ;
+ 
+-cube_by_clause : BY^ cube_by_expr_list
++cube_by_clause : BY^ cube_or_rollup
+ ;
+ 
++cube_or_rollup : cube_rollup_list ( COMMA cube_rollup_list )*
++                -> cube_rollup_list+
++;
++
++cube_rollup_list : ( CUBE | ROLLUP )^ cube_by_expr_list
++;
++
+ cube_by_expr_list : LEFT_PAREN cube_by_expr ( COMMA cube_by_expr )* RIGHT_PAREN
+-                       -> cube_by_expr+
+-                        | cube_by_expr
++                   -> cube_by_expr+
+ ;
+ 
+ cube_by_expr : col_range  | expr | STAR
+@@ -730,6 +736,7 @@
+     | FILTER
+     | FOREACH
+     | CUBE
++    | ROLLUP
+     | ORDER
+     | DISTINCT
+     | COGROUP
+Index: src/org/apache/pig/parser/LogicalPlanBuilder.java
+===================================================================
+--- src/org/apache/pig/parser/LogicalPlanBuilder.java	(revision 1360329)
++++ src/org/apache/pig/parser/LogicalPlanBuilder.java	(working copy)
+@@ -39,6 +39,7 @@
+ import org.apache.pig.builtin.CubeDimensions;
+ import org.apache.pig.builtin.PigStorage;
+ import org.apache.pig.builtin.RANDOM;
++import org.apache.pig.builtin.RollupDimensions;
+ import org.apache.pig.data.BagFactory;
+ import org.apache.pig.data.DataBag;
+ import org.apache.pig.data.DataType;
+@@ -371,34 +372,123 @@
+     }
+     
+     LOCube createCubeOp() {
+-        return new LOCube(plan);
++	return new LOCube(plan);
+     }
+-    
+-    String buildCubeOp(SourceLocation loc, LOCube op, String alias,
+-	    String inputAlias,
+-	    MultiMap<Integer, LogicalExpressionPlan> expressionPlans)
++
++    String buildCubeOp(SourceLocation loc, LOCube op, String alias, String inputAlias,
++	    List<String> operations, MultiMap<Integer, LogicalExpressionPlan> expressionPlans)
+ 	    throws ParserValidationException {
+ 
++	// check if continuously occurring cube operations be combined
++	combineCubeOperations((ArrayList<String>) operations, expressionPlans);
++
+ 	// set the expression plans for cube operator and build cube operator
+ 	op.setExpressionPlans(expressionPlans);
++	op.setOperations(operations);
+ 	buildOp(loc, op, alias, inputAlias, null);
+ 	expandAndResetVisitor(loc, op);
+-
+ 	try {
+-	    alias = convertCubeToFGPlan(loc, op, inputAlias, op.getExpressionPlans());
+-        } catch (FrontendException e) {
+-            throw new ParserValidationException( intStream, loc, e );
+-        }
+-        return alias;
++	    alias = convertCubeToFGPlan(loc, op, inputAlias, operations, expressionPlans);
++	} catch (FrontendException e) {
++	    throw new ParserValidationException(intStream, loc, e);
++	}
++	return alias;
+     }
+ 
+-     // This function creates logical plan for foreach and groupby operators. 
+-     // It connects the predecessors of cube operator with foreach plan and
+-     // disconnects cube operator from the logical plan. It also connects foreach
+-     // plan with groupby plan.
+-    private String convertCubeToFGPlan(SourceLocation loc, LOCube op,
+-	    String inputAlias,
+-	    MultiMap<Integer, LogicalExpressionPlan> expressionPlans)
++    // if multiple CUBE operations occur continuously then it can be combined
++    // together CUBE rel BY CUBE(a,b), CUBE(c,d); => CUBE rel BY CUBE(a,b,c,d)
++    private void combineCubeOperations(ArrayList<String> operations,
++	    MultiMap<Integer, LogicalExpressionPlan> expressionPlans) {
++
++	int startIdx = -1;
++	int endIdx = -1;
++	int i = 0;
++	boolean isMerged = false;
++
++	// scan and perform merge of column projections
++	for (i = 0; i < operations.size(); i++) {
++	    if ((startIdx == -1) && (operations.get(i).equals("CUBE") == true)) {
++		startIdx = i;
++	    } else {
++		if (operations.get(i).equals("CUBE") == true) {
++		    endIdx = i;
++		} else {
++		    if (endIdx > startIdx) {
++			mergeAndMarkForDelete(operations, expressionPlans, startIdx, endIdx);
++			isMerged = true;
++			startIdx = -1;
++			endIdx = -1;
++		    } else {
++			startIdx = -1;
++			endIdx = -1;
++		    }
++		}
++	    }
++	}
++
++	// this check is required for the case when the sequence of CUBE
++	// operations occurs at the end, like (CUBE, ROLLUP, CUBE, CUBE)
++	// in which case endIdx will be greater than startIdx
++	if (endIdx > startIdx) {
++	    isMerged = true;
++	    mergeAndMarkForDelete(operations, expressionPlans, startIdx, endIdx);
++	}
++
++	// if merged then remove the column projections that were marked for
++	// deletion
++	if (isMerged) {
++	    performDeletion(expressionPlans, operations);
++	}
++    }
++
++    private void performDeletion(MultiMap<Integer, LogicalExpressionPlan> expressionPlans,
++	    ArrayList<String> operations) {
++
++	MultiMap<Integer, LogicalExpressionPlan> ep = new MultiMap<Integer, LogicalExpressionPlan>();
++	List<String> op = new ArrayList<String>();
++	int idx = 0;
++	// rearranging indices
++	for (int i = 0; i < operations.size(); i++) {
++	    if (operations.get(i) != null) {
++		op.add(idx, operations.get(i));
++	    }
++
++	    if (expressionPlans.get(i) != null) {
++		ep.put(idx, expressionPlans.get(i));
++		idx++;
++	    }
++	}
++
++	// performing deletions
++	operations.clear();
++	operations.addAll(op);
++
++	expressionPlans.clear();
++	for (Integer i : ep.keySet()) {
++	    expressionPlans.put(i, ep.get(i));
++	}
++    }
++
++    // performs merging of dimensions of merged cube operation
++    // Ex: CUBE(a,b), CUBE(c,d) ==> CUBE(a,b,c,d)
++    // in the above example CUBE operator and dimensions are merged
++    private void mergeAndMarkForDelete(ArrayList<String> operations,
++	    MultiMap<Integer, LogicalExpressionPlan> expressionPlans, int startIdx, int endIdx) {
++	// mark for delete
++	for (int i = startIdx + 1; i <= endIdx; i++) {
++	    expressionPlans.put(startIdx, expressionPlans.get(i));
++	    expressionPlans.removeKey(i);
++	    operations.remove(i);
++	    operations.add(i, null);
++	}
++    }
++
++    // This function creates logical plan for foreach and groupby operators.
++    // It connects the predecessors of cube operator with foreach plan and
++    // disconnects cube operator from the logical plan. It also connects foreach
++    // plan with groupby plan.
++    private String convertCubeToFGPlan(SourceLocation loc, LOCube op, String inputAlias,
++	    List<String> operations, MultiMap<Integer, LogicalExpressionPlan> expressionPlans)
+ 	    throws FrontendException {
+ 
+ 	LOForEach foreach = new LOForEach(plan);
+@@ -411,7 +501,7 @@
+ 	// Get all column attributes from the input relation.
+ 	// Create ProjectExpression for all columns. Based on the
+ 	// dimensions specified by the user, specified columns will be attached
+-	// to CubeDimension UDF and rest will be pushed down
++	// to CubeDimension/RollupDimension UDF and rest will be pushed down
+ 	List<Operator> inpOpers = foreach.getPlan().getPredecessors(foreach);
+ 	List<LogicalExpressionPlan> allExprPlan = new ArrayList<LogicalExpressionPlan>();
+ 	for (Operator oper : inpOpers) {
+@@ -419,7 +509,8 @@
+ 	    schema = ((LogicalRelationalOperator) oper).getSchema();
+ 
+ 	    if (schema != null) {
+-		ArrayList<LogicalFieldSchema> fields = (ArrayList<LogicalFieldSchema>)schema.getFields();
++		ArrayList<LogicalFieldSchema> fields = (ArrayList<LogicalFieldSchema>) schema
++		        .getFields();
+ 		for (int i = 0; i < fields.size(); i++) {
+ 		    LogicalExpressionPlan lEplan = new LogicalExpressionPlan();
+ 		    new ProjectExpression(lEplan, i, fields.get(i).alias, gen);
+@@ -428,55 +519,81 @@
+ 	    }
+ 	}
+ 
+-	List<LogicalExpressionPlan> lexpPlanList = new ArrayList<LogicalExpressionPlan>();
+-	List<LogicalExpression> lexpList = new ArrayList<LogicalExpression>();
++	// iterate over all operations and generate corresponding UDFs
++	for (int operIdx = 0; operIdx < operations.size(); operIdx++) {
++	    List<LogicalExpressionPlan> lexpPlanList = new ArrayList<LogicalExpressionPlan>();
++	    List<LogicalExpression> lexpList = new ArrayList<LogicalExpression>();
+ 
+-	// TODO: current implementation only supports star schema
+-	// if snow-flake schema is to be supported then dimensions
+-	// from multiple tables should be retrieved here.
+-	lexpPlanList.addAll(expressionPlans.get(0));
++	    lexpPlanList.addAll(expressionPlans.get(operIdx));
+ 
+-	// If duplicates exists in the dimension list then exception is thrown
+-	checkDuplicateProject(lexpPlanList);
++	    // If duplicates exists in the dimension list then exception is
++	    // thrown
++	    checkDuplicateProject(lexpPlanList);
+ 
+-	// Construct ProjectExpression from the LogicalExpressionPlans
+-	lexpList = getProjectExpList(lexpPlanList, gen);
++	    // Construct ProjectExpression from the LogicalExpressionPlans
++	    lexpList = getProjectExpList(lexpPlanList, gen);
+ 
+-	for (int i = 0; i < lexpList.size(); i++) {
+-	    // Retain the columns that needs to be pushed down. 
+-	    // Remove the dimension columns from the input column list
+-	    // as it will be attached to CubeDimension UDF
+-	    for (int j = 0; j < allExprPlan.size(); j++) {
+-		LogicalExpression lexp = (LogicalExpression) allExprPlan.get(j).getSources().get(0);
+-		String colAlias = ((ProjectExpression) lexpList.get(i)).getColAlias();
+-		if (colAlias == null) {
+-		    colAlias = ((ProjectExpression) lexpList.get(i)).getFieldSchema().alias;
+-		}
++	    for (int i = 0; i < lexpList.size(); i++) {
++		// Retain the columns that needs to be pushed down.
++		// Remove the dimension columns from the input column list
++		// as it will be attached to CubeDimension UDF
++		for (int j = 0; j < allExprPlan.size(); j++) {
++		    LogicalExpression lexp = (LogicalExpression) allExprPlan.get(j).getSources()
++			    .get(0);
++		    String colAlias = ((ProjectExpression) lexpList.get(i)).getColAlias();
++		    if (colAlias == null) {
++			colAlias = ((ProjectExpression) lexpList.get(i)).getFieldSchema().alias;
++		    }
+ 
+-		if (colAlias.equals(((ProjectExpression) lexp).getColAlias()) == true) {
+-		    allExprPlan.remove(j);
++		    String projExpAlias = null;
++		    try {
++			projExpAlias = ((ProjectExpression) lexp).getColAlias();
++		    } catch (ClassCastException e) {
++			// if it is not projection then it should be
++			// UserFuncExpr.
++			// ignore and continue till next ProjExpr is encountered
++			continue;
++		    }
++		    if (colAlias.equals(projExpAlias) == true) {
++			allExprPlan.remove(j);
++		    } else {
++			// if projected exp alias is a namespaced alias
++			if (projExpAlias.lastIndexOf(":") != -1) {
++			    projExpAlias = projExpAlias.substring(
++				    projExpAlias.lastIndexOf(":") + 1, projExpAlias.length());
++			    if (colAlias.equals(projExpAlias) == true) {
++				allExprPlan.remove(j);
++			    }
++			}
++		    }
+ 		}
+ 	    }
+ 
+-	}
++	    // Create UDF with user specified dimensions
++	    LogicalExpressionPlan uexpPlan = new LogicalExpressionPlan();
++	    if (operations.get(operIdx).equals("CUBE")) {
++		new UserFuncExpression(uexpPlan, new FuncSpec(CubeDimensions.class.getName()),
++		        lexpList);
++	    } else {
++		new UserFuncExpression(uexpPlan, new FuncSpec(RollupDimensions.class.getName()),
++		        lexpList);
++	    }
+ 
+-	// Create UDF with user specified dimensions 
+-	LogicalExpressionPlan uexpPlan = new LogicalExpressionPlan();
+-	new UserFuncExpression(uexpPlan, new FuncSpec(CubeDimensions.class.getName()), lexpList);
+-	for (LogicalExpressionPlan lexp : lexpPlanList) {
+-	    Iterator<Operator> it = lexp.getOperators();
+-	    while (it.hasNext()) {
+-		uexpPlan.add(it.next());
++	    for (LogicalExpressionPlan lexp : lexpPlanList) {
++		Iterator<Operator> it = lexp.getOperators();
++		while (it.hasNext()) {
++		    uexpPlan.add(it.next());
++		}
+ 	    }
++	    // Add the UDF to logical expression plan that contains dependent
++	    // attributes (pushed down from input columns)
++	    allExprPlan.add(operIdx, uexpPlan);
+ 	}
+-	// Add the UDF to logical expression plan that contains dependent
+-	// attributes (pushed down from input columns)
+-	allExprPlan.add(0, uexpPlan);
+ 
+ 	// If the operator is a UserFuncExpression then set the flatten flags.
+ 	List<Boolean> flattenFlags = new ArrayList<Boolean>();
+-	for (int i = 0; i < allExprPlan.size(); i++) {
+-	    List<Operator> opers = allExprPlan.get(i).getSources();
++	for (int idx = 0; idx < allExprPlan.size(); idx++) {
++	    List<Operator> opers = allExprPlan.get(idx).getSources();
+ 	    for (Operator oper : opers) {
+ 		if (oper instanceof ProjectExpression) {
+ 		    flattenFlags.add(false);
+@@ -489,9 +606,9 @@
+ 	// Generate and Foreach operator creation
+ 	String falias = null;
+ 	try {
+-	    buildGenerateOp(loc, (LOForEach) foreach, (LOGenerate) gen, 
+-		    operators, allExprPlan, flattenFlags, null);
+-	    falias = buildForeachOp(loc, (LOForEach) foreach, "cube",inputAlias, innerPlan);
++	    buildGenerateOp(loc, (LOForEach) foreach, (LOGenerate) gen, operators, allExprPlan,
++		    flattenFlags, getUserDefinedSchema(allExprPlan));
++	    falias = buildForeachOp(loc, (LOForEach) foreach, "cube", inputAlias, innerPlan);
+ 	} catch (ParserValidationException pve) {
+ 	    throw new FrontendException(pve);
+ 	}
+@@ -504,36 +621,64 @@
+ 	// Get the output schema of foreach operator and reconstruct the
+ 	// LogicalExpressionPlan for each dimensional attributes
+ 	MultiMap<Integer, LogicalExpressionPlan> exprPlansCopy = new MultiMap<Integer, LogicalExpressionPlan>();
+-	LogicalSchema fSchema = null;
+-	fSchema = foreach.getSchema();
+ 
+-	List<LogicalFieldSchema> lfSchemas = fSchema.getFields();
+-	for (LogicalFieldSchema lfSchema : lfSchemas) {
++	for (LogicalExpressionPlan exp : expressionPlans.values()) {
++	    LogicalExpression lexp = (LogicalExpression) exp.getSources().get(0);
+ 	    LogicalExpressionPlan epGrp = new LogicalExpressionPlan();
+-	    if (lfSchema.alias.contains("dimensions::") == true) {
+-		new ProjectExpression(epGrp, 0, lfSchema.alias, groupby);
+-		exprPlansCopy.put(0, epGrp);
+-	    }
++	    new ProjectExpression(epGrp, 0, lexp.getFieldSchema().alias, groupby);
++	    exprPlansCopy.put(0, epGrp);
+ 	}
+ 
+ 	// build group by operator
+ 	try {
+-	    return buildGroupOp(loc, (LOCogroup) groupby, op.getAlias(),
+-		    inpAliases, exprPlansCopy, GROUPTYPE.REGULAR, innerFlags,null);
++	    return buildGroupOp(loc, (LOCogroup) groupby, op.getAlias(), inpAliases, exprPlansCopy,
++		    GROUPTYPE.REGULAR, innerFlags, null);
+ 	} catch (ParserValidationException pve) {
+ 	    throw new FrontendException(pve);
+ 	}
+     }
+-    
++
++    // User defined schema for generate operator. If not specified output schema
++    // of UDF will be used which will prefix "dimensions" namespace to all fields
++    private List<LogicalSchema> getUserDefinedSchema(List<LogicalExpressionPlan> allExprPlan)
++	    throws FrontendException {
++	List<LogicalSchema> genOutputSchema = new ArrayList<LogicalSchema>();
++	for (int i = 0; i < allExprPlan.size(); i++) {
++	    List<Operator> opers = allExprPlan.get(i).getSources();
++	    for (Operator oper : opers) {
++
++		// add a logical schema for dimensions that are pushed from
++		// predecessor of cube/rollup
++		if (oper instanceof ProjectExpression) {
++		    LogicalSchema output = new LogicalSchema();
++		    output.addField(new LogicalFieldSchema(
++			    ((ProjectExpression) oper).getColAlias(), null, DataType.NULL));
++		    genOutputSchema.add(output);
++		} else if (oper instanceof UserFuncExpression) {
++		    // add logical schema for dimensions specified in
++		    // cube/rollup operator
++		    LogicalSchema output = new LogicalSchema();
++		    for (Operator op : ((UserFuncExpression) oper).getPlan().getSinks()) {
++			output.addField(new LogicalFieldSchema(((ProjectExpression) op)
++			        .getFieldSchema()));
++		    }
++		    genOutputSchema.add(output);
++		}
++
++	    }
++	}
++	return genOutputSchema;
++    }
++
+     private List<LogicalExpression> getProjectExpList(List<LogicalExpressionPlan> lexpPlanList,
+ 	    LogicalRelationalOperator lro) throws FrontendException {
+ 
+-	 List<LogicalExpression> leList = new  ArrayList<LogicalExpression>();
++	List<LogicalExpression> leList = new ArrayList<LogicalExpression>();
+ 	for (int i = 0; i < lexpPlanList.size(); i++) {
+ 	    LogicalExpressionPlan lexp = lexpPlanList.get(i);
+ 	    LogicalExpression lex = (LogicalExpression) lexp.getSources().get(0);
+ 	    Iterator<Operator> opers = lexp.getOperators();
+-	    
++
+ 	    // ProjExpr are initially attached to CubeOp. So re-attach it to
+ 	    // specified operator
+ 	    while (opers.hasNext()) {
+@@ -544,18 +689,17 @@
+ 		    throw new FrontendException("Column project expected.", cce);
+ 		}
+ 	    }
+-	   
++
+ 	    leList.add(lex);
+ 	}
+-	
++
+ 	return leList;
+     }
+ 
+-
+     // This method connects the predecessors of cube operator with foreach
+     // operator and disconnects the cube operator from its predecessors
+-    private void injectForeachOperator(SourceLocation loc, LOCube op,
+-	    LOForEach foreach) throws FrontendException {
++    private void injectForeachOperator(SourceLocation loc, LOCube op, LOForEach foreach)
++	    throws FrontendException {
+ 	// connect the foreach operator with predecessors of cube operator
+ 	List<Operator> opers = op.getPlan().getPredecessors(op);
+ 	for (Operator oper : opers) {
+@@ -575,7 +719,7 @@
+ 	    }
+ 	}
+     }
+-    
++
+     // This methods if the dimensions specified by the user has duplicates
+     private void checkDuplicateProject(List<LogicalExpressionPlan> lExprPlan)
+ 	    throws FrontendException {
+@@ -597,13 +741,13 @@
+ 
+ 		if (outColAlias.equals(inColAlias) == true) {
+ 		    lExprPlan.remove(j);
+-		    throw new FrontendException("Duplicate dimensions detected. Dimension name: " + inColAlias);
++		    throw new FrontendException("Duplicate dimensions detected. Dimension name: "
++			    + inColAlias);
+ 		}
+ 	    }
+ 	}
+ 
+     }
+-
+ 	
+     LOCogroup createGroupOp() {
+         return new LOCogroup( plan );
+Index: src/org/apache/pig/newplan/logical/relational/LOCube.java
+===================================================================
+--- src/org/apache/pig/newplan/logical/relational/LOCube.java	(revision 1360329)
++++ src/org/apache/pig/newplan/logical/relational/LOCube.java	(working copy)
+@@ -28,38 +28,68 @@
+ import org.apache.pig.newplan.PlanVisitor;
+ import org.apache.pig.newplan.logical.expression.LogicalExpressionPlan;
+ 
+-/** 
++/**
+  * CUBE operator implementation for data cube computation.
+- * <p> 
++ * <p>
+  * Cube operator syntax
+- * <pre>{@code alias = CUBE rel BY (col_ref);}
++ * 
++ * <pre>
++ * {@code alias = CUBE rel BY { CUBE | ROLLUP }(col_ref) [, { CUBE | ROLLUP }(col_ref) ...];}
+  * alias - output alias 
+  * CUBE - operator
+  * rel - input relation
+  * BY - operator
++ * CUBE | ROLLUP - cube or rollup operation
+  * col_ref - column references or * or range in the schema referred by rel
+- * </pre> </p>
++ * </pre>
++ * 
++ * </p>
+  * <p>
+- * The cube computation code sample at {@link org.apache.pig.builtin.CubeDimensions} 
+- * can now be represented like below
+- * <pre>{@code
+- * events = LOAD '/logs/events' USING EventLoader() AS (lang, event, app_id, total);
+- * eventcube = CUBE events BY (lang, event, app_id);
+- * result = FOREACH eventcube GENERATE FLATTEN(group) as (lang, event, app_id),
++ * The cube computation and rollup computation using UDFs
++ * {@link org.apache.pig.builtin.CubeDimensions} and
++ * {@link org.apache.pig.builtin.RollupDimensions} can be represented like below
++ * 
++ * <pre>
++ * {@code
++ * events = LOAD '/logs/events' USING EventLoader() AS (lang, event, app_id, event_id, total);
++ * eventcube = CUBE events BY CUBE(lang, event), ROLLUP(app_id, event_id);
++ * result = FOREACH eventcube GENERATE FLATTEN(group) as (lang, event),
+  *          COUNT_STAR(cube), SUM(cube.total);
+  * STORE result INTO 'cuberesult';
+- * }</pre>
++ * }
++ * </pre>
++ * 
++ * In the above example, CUBE(lang, event) will generate all combinations of
++ * aggregations {(lang, event), (lang, ), ( , event), ( , )}. 
++ * For n dimensions, 2^n combinations of aggregations will be generated.
++ * 
++ * Similarly, ROLLUP(app_id, event_id) will generate aggregations from the most
++ * detailed to the most general (grandtotal) level in the hierarchical order
++ * like {(app_id, event_id), (app_id, ), ( , )}. For n dimensions,
++ * n+1 combinations of aggregations will be generated.
++ * 
++ * The output of the above example query will have the following combinations of
++ * aggregations {(lang, event, app_id, event_id), (lang, , app_id, event_id), 
++ * ( , event, app_id, event_id), ( , , app_id, event_id), (lang, event, app_id, ), 
++ * (lang, , app_id, ), ( , event, app_id, ), ( , , app_id, ), (lang, event, , ), 
++ * (lang, , , ), ( , event, , ), ( , , , )}
++ * 
++ * Total number of combinations will be ( 2^n * (n+1) )
++ * 
++ * Since cube and rollup clause use null to represent "all" values of a dimension, 
++ * if the dimension values contain null values it will be converted to "unknown" 
++ * before computing cube or rollup. 
+  * </p>
+  */
+ public class LOCube extends LogicalRelationalOperator {
+     private MultiMap<Integer, LogicalExpressionPlan> mExpressionPlans;
++    private List<String> operations;
+ 
+     public LOCube(LogicalPlan plan) {
+ 	super("LOCube", plan);
+     }
+ 
+-    public LOCube(OperatorPlan plan,
+-	    MultiMap<Integer, LogicalExpressionPlan> expressionPlans) {
++    public LOCube(OperatorPlan plan, MultiMap<Integer, LogicalExpressionPlan> expressionPlans) {
+ 	super("LOCube", plan);
+ 	this.mExpressionPlans = expressionPlans;
+     }
+@@ -108,17 +138,24 @@
+ 	return mExpressionPlans;
+     }
+ 
+-    public void setExpressionPlans(
+-	    MultiMap<Integer, LogicalExpressionPlan> plans) {
++    public void setExpressionPlans(MultiMap<Integer, LogicalExpressionPlan> plans) {
+ 	this.mExpressionPlans = plans;
+     }
+ 
+     @Override
+     public void resetUid() {
+-	//TODO: implement when physical operator for CUBE is implemented
++	// TODO: implement when physical operator for CUBE is implemented
+     }
+ 
+     public List<Operator> getInputs(LogicalPlan plan) {
+ 	return plan.getPredecessors(this);
+     }
++
++    public List<String> getOperations() {
++	return operations;
++    }
++
++    public void setOperations(List<String> operations) {
++	this.operations = operations;
++    }
+ }
+Index: src/org/apache/pig/builtin/RollupDimensions.java
+===================================================================
+--- src/org/apache/pig/builtin/RollupDimensions.java	(revision 0)
++++ src/org/apache/pig/builtin/RollupDimensions.java	(revision 0)
+@@ -0,0 +1,91 @@
++/*
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.apache.pig.builtin;
++
++import java.io.IOException;
++import java.util.List;
++
++import org.apache.pig.EvalFunc;
++import org.apache.pig.backend.executionengine.ExecException;
++import org.apache.pig.data.BagFactory;
++import org.apache.pig.data.DataBag;
++import org.apache.pig.data.DataType;
++import org.apache.pig.data.Tuple;
++import org.apache.pig.data.TupleFactory;
++import org.apache.pig.impl.logicalLayer.FrontendException;
++import org.apache.pig.impl.logicalLayer.schema.Schema;
++import org.apache.pig.impl.logicalLayer.schema.Schema.FieldSchema;
++
++import com.google.common.collect.Lists;
++
++/**
++ * Produces a DataBag with hierarchy of values (from the most detailed level of
++ * aggregation to most general level of aggregation) of the specified dimensions
++ * For example, (a, b, c) will produce the following bag:
++ * 
++ * <pre>
++ * { (a, b, c), (a, b, null), (a, null, null), (null, null, null) }
++ * </pre>
++ */
++public class RollupDimensions extends EvalFunc<DataBag> {
++
++    private static BagFactory bf = BagFactory.getInstance();
++    private static TupleFactory tf = TupleFactory.getInstance();
++    private final String allMarker;
++
++    public RollupDimensions() {
++	this(null);
++    }
++
++    public RollupDimensions(String allMarker) {
++	super();
++	this.allMarker = allMarker;
++    }
++
++    @Override
++    public DataBag exec(Tuple tuple) throws IOException {
++	List<Tuple> result = Lists.newArrayListWithCapacity(tuple.size() + 1);
++	CubeDimensions.convertNullToUnknown(tuple);
++	result.add(tuple);
++	iterativelyRollup(result, tuple);
++	return bf.newDefaultBag(result);
++    }
++
++    private void iterativelyRollup(List<Tuple> result, Tuple input) throws ExecException {
++	Tuple tempTup = tf.newTuple(input.getAll());
++	for (int i = input.size() - 1; i >= 0; i--) {
++	    tempTup.set(i, allMarker);
++	    result.add(tf.newTuple(tempTup.getAll()));
++	}
++    }
++
++    @Override
++    public Schema outputSchema(Schema input) {
++	// "dimensions" string is the default namespace assigned to the output
++	// schema. this can be overridden by specifying user defined schema
++	// names in foreach operator. if user defined schema names are not
++	// specified then the output schema of foreach operator using this UDF
++	// will have "dimensions::" namespace for all fields in the tuple
++	try {
++	    return new Schema(new FieldSchema("dimensions", input, DataType.BAG));
++	} catch (FrontendException e) {
++	    // we are specifying BAG explicitly, so this should not happen.
++	    throw new RuntimeException(e);
++	}
++    }
++}
+Index: src/org/apache/pig/builtin/CubeDimensions.java
+===================================================================
+--- src/org/apache/pig/builtin/CubeDimensions.java	(revision 1360329)
++++ src/org/apache/pig/builtin/CubeDimensions.java	(working copy)
+@@ -70,7 +70,7 @@
+     private static BagFactory bf = BagFactory.getInstance();
+     private static TupleFactory tf = TupleFactory.getInstance();
+     private final String allMarker;
+-    private final String unknown = "unknown";
++    private static final String unknown = "unknown";
+ 
+     public CubeDimensions() {
+         this(null);
+@@ -82,24 +82,22 @@
+     @Override
+     public DataBag exec(Tuple tuple) throws IOException {
+         List<Tuple> result = Lists.newArrayListWithCapacity((int) Math.pow(2, tuple.size()));
+-        Tuple nonNullTuple = convertNullToUnknown(tuple);
++        convertNullToUnknown(tuple);
+         Tuple newt = tf.newTuple(tuple.size());
+-        recursivelyCube(result, nonNullTuple, 0, newt);
++        recursivelyCube(result, tuple, 0, newt);
+         return bf.newDefaultBag(result);
+     }
+ 
+     // if the dimension values contain null then replace it with "unknown" value
+     // since null will be used for rollups
+-    private Tuple convertNullToUnknown(Tuple tuple) throws ExecException {
+-	Tuple nonNullTup = tf.newTuple(tuple.getAll());
++    public static void convertNullToUnknown(Tuple tuple) throws ExecException {
+ 	int idx = 0;
+ 	for(Object obj : tuple.getAll()) {
+ 	    if( (obj == null) ) {
+-		nonNullTup.set(idx, unknown);
++		tuple.set(idx, unknown);
+ 	    }
+ 	    idx++;
+ 	}
+-	return nonNullTup;
+     }
+     
+     private void recursivelyCube(List<Tuple> result, Tuple input, int index, Tuple newt) throws ExecException {

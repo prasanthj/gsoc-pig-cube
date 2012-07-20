@@ -1,0 +1,1462 @@
+Index: test/org/apache/pig/test/TestCubeOperator.java
+===================================================================
+--- test/org/apache/pig/test/TestCubeOperator.java	(revision 0)
++++ test/org/apache/pig/test/TestCubeOperator.java	(revision 0)
+@@ -0,0 +1,432 @@
++/*
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package org.apache.pig.test;
++
++import static org.junit.Assert.assertTrue;
++
++import java.io.File;
++import java.io.IOException;
++import java.util.Iterator;
++import java.util.Set;
++
++import org.apache.pig.ExecType;
++import org.apache.pig.PigServer;
++import org.apache.pig.backend.executionengine.ExecException;
++import org.apache.pig.data.Tuple;
++import org.apache.pig.data.TupleFactory;
++import org.junit.AfterClass;
++import org.junit.Before;
++import org.junit.BeforeClass;
++import org.junit.Test;
++
++import com.google.common.collect.ImmutableList;
++import com.google.common.collect.ImmutableSet;
++
++public class TestCubeOperator {
++	private static String[] data = {"dog\tmiami\t12","cat\tmiami\t18","turtle\ttampa\t4",
++		"dog\ttampa\t14","cat\tnaples\t9","dog\tnaples\t5","turtle\tnaples\t1"};
++	private static String[] data1 = {"u1,men,green,mango","u2,men,red,mango","u3,men,green,apple","u4,women,red,mango",
++		"u6,women,green,mango","u7,men,red,apple","u8,men,green,mango","u9,women,red,apple","u10,women,green,apple",
++		"u11,men,red,apple","u12,women,green,mango"};
++	private static File inputFile;
++	private static File inputFile1;
++    private static MiniCluster cluster;
++    private static PigServer pigServer;
++    private static TupleFactory tf = TupleFactory.getInstance();
++    
++    @BeforeClass
++    public static void oneTimeSetUp() throws Exception {
++        inputFile = Util.createFile(data);
++        inputFile1 = Util.createFile(data1);
++        cluster = MiniCluster.buildCluster();
++        Util.copyFromLocalToCluster(cluster, inputFile.getAbsolutePath(), inputFile.getName());
++        Util.copyFromLocalToCluster(cluster, inputFile1.getAbsolutePath(), inputFile1.getName());
++        inputFile.delete();
++        inputFile1.delete();
++    }
++
++    @Before
++    public void setUp() throws ExecException {
++        pigServer = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
++    }
++
++    @AfterClass
++    public static void oneTimeTearDown() throws IOException {
++        Util.deleteFile(cluster, inputFile.getName());
++        Util.deleteFile(cluster, inputFile1.getName());
++        cluster.shutDown();
++    }
++    
++    @Test
++    public void testCubeOperator1() throws IOException {
++        String query = 
++            "a = load '" + inputFile.getName() + "' as (x:chararray,y:chararray,z:long);" + 
++            "b = cube a by (x,y);" + 
++            "c = foreach b generate flatten(group) as (type,location), COUNT(cube) as count, SUM(cube.z) as total;";
++
++        Util.registerMultiLineQuery(pigServer, query);
++        Iterator<Tuple> it = pigServer.openIterator("c");
++
++        Set<Tuple> expected = ImmutableSet.of(
++                tf.newTuple(ImmutableList.of("cat", "miami", (long)1, (long)18)),
++                tf.newTuple(ImmutableList.of("cat", "naples", (long)1, (long)9)),
++                tf.newTuple(ImmutableList.of("cat", "NULL", (long)2, (long)27)),
++                tf.newTuple(ImmutableList.of("dog", "miami", (long)1, (long)12)),
++                tf.newTuple(ImmutableList.of("dog", "tampa", (long)1, (long)14)),
++                tf.newTuple(ImmutableList.of("dog", "naples", (long)1, (long)5)),
++                tf.newTuple(ImmutableList.of("dog", "NULL", (long)3, (long)31)),
++                tf.newTuple(ImmutableList.of("turtle", "tampa", (long)1, (long)4)),
++                tf.newTuple(ImmutableList.of("turtle", "naples", (long)1, (long)1)),
++                tf.newTuple(ImmutableList.of("turtle", "NULL", (long)2, (long)5)),
++                tf.newTuple(ImmutableList.of("NULL", "miami", (long)2, (long)30)),
++                tf.newTuple(ImmutableList.of("NULL", "tampa", (long)2, (long)18)),
++                tf.newTuple(ImmutableList.of("NULL", "naples", (long)3, (long)15)),
++                tf.newTuple(ImmutableList.of("NULL", "NULL", (long)7, (long)63))
++        );
++        
++        while(it.hasNext()) {
++        	assertTrue(expected.contains(it.next()));
++        }
++
++    }
++
++    @Test
++    public void testCubeOperator2() throws IOException {
++        String query = 
++            "a = load '" + inputFile.getName() + "' as (x:chararray,y:chararray,z:long);" +
++            "a = load '" + inputFile.getName() + "' as (x,y:chararray,z:long);" +
++            "a = load '" + inputFile.getName() + "' as (x:chararray,y:chararray,z:long);" +
++            "b = cube a by (x,y);" + 
++            "c = foreach b generate flatten(group) as (type,location), COUNT(cube) as count, SUM(cube.z) as total;";
++
++        Util.registerMultiLineQuery(pigServer, query);
++        Iterator<Tuple> it = pigServer.openIterator("c");
++
++        Set<Tuple> expected = ImmutableSet.of(
++                tf.newTuple(ImmutableList.of("cat", "miami", (long)1, (long)18)),
++                tf.newTuple(ImmutableList.of("cat", "naples", (long)1, (long)9)),
++                tf.newTuple(ImmutableList.of("cat", "NULL", (long)2, (long)27)),
++                tf.newTuple(ImmutableList.of("dog", "miami", (long)1, (long)12)),
++                tf.newTuple(ImmutableList.of("dog", "tampa", (long)1, (long)14)),
++                tf.newTuple(ImmutableList.of("dog", "naples", (long)1, (long)5)),
++                tf.newTuple(ImmutableList.of("dog", "NULL", (long)3, (long)31)),
++                tf.newTuple(ImmutableList.of("turtle", "tampa", (long)1, (long)4)),
++                tf.newTuple(ImmutableList.of("turtle", "naples", (long)1, (long)1)),
++                tf.newTuple(ImmutableList.of("turtle", "NULL", (long)2, (long)5)),
++                tf.newTuple(ImmutableList.of("NULL", "miami", (long)2, (long)30)),
++                tf.newTuple(ImmutableList.of("NULL", "tampa", (long)2, (long)18)),
++                tf.newTuple(ImmutableList.of("NULL", "naples", (long)3, (long)15)),
++                tf.newTuple(ImmutableList.of("NULL", "NULL", (long)7, (long)63))
++        );
++        
++        while(it.hasNext()) {
++        	assertTrue(expected.contains(it.next()));
++        }
++
++    }
++    
++    @Test
++    public void testCubeOperator3() throws IOException {
++        String query = 
++            "a = load '" + inputFile.getName() + "' as (x:chararray,y:chararray,z:long);" +
++            "b = foreach a generate x as type,y as location,z as number;" +
++            "c = cube b by (type,location);" + 
++            "d = foreach c generate flatten(group) as (type,location), COUNT(cube) as count, SUM(cube.number) as total;";
++
++        Util.registerMultiLineQuery(pigServer, query);
++        Iterator<Tuple> it = pigServer.openIterator("d");
++
++        Set<Tuple> expected = ImmutableSet.of(
++                tf.newTuple(ImmutableList.of("cat", "miami", (long)1, (long)18)),
++                tf.newTuple(ImmutableList.of("cat", "naples", (long)1, (long)9)),
++                tf.newTuple(ImmutableList.of("cat", "NULL", (long)2, (long)27)),
++                tf.newTuple(ImmutableList.of("dog", "miami", (long)1, (long)12)),
++                tf.newTuple(ImmutableList.of("dog", "tampa", (long)1, (long)14)),
++                tf.newTuple(ImmutableList.of("dog", "naples", (long)1, (long)5)),
++                tf.newTuple(ImmutableList.of("dog", "NULL", (long)3, (long)31)),
++                tf.newTuple(ImmutableList.of("turtle", "tampa", (long)1, (long)4)),
++                tf.newTuple(ImmutableList.of("turtle", "naples", (long)1, (long)1)),
++                tf.newTuple(ImmutableList.of("turtle", "NULL", (long)2, (long)5)),
++                tf.newTuple(ImmutableList.of("NULL", "miami", (long)2, (long)30)),
++                tf.newTuple(ImmutableList.of("NULL", "tampa", (long)2, (long)18)),
++                tf.newTuple(ImmutableList.of("NULL", "naples", (long)3, (long)15)),
++                tf.newTuple(ImmutableList.of("NULL", "NULL", (long)7, (long)63))
++        );
++        
++        while(it.hasNext()) {
++        	assertTrue(expected.contains(it.next()));
++        }
++
++    }
++
++    @Test
++    public void testCubeOperator4() throws IOException {
++        String query = 
++            "a = load '" + inputFile.getName() + "' as (x:chararray,y:chararray,z:long);" +
++            "b = limit a 2;" +
++            "c = cube b by (x,y);" + 
++            "d = foreach c generate flatten(group) as (x,y), SUM(cube.z) as total;";
++
++        Util.registerMultiLineQuery(pigServer, query);
++        Iterator<Tuple> it = pigServer.openIterator("d");
++
++        Set<Tuple> expected = ImmutableSet.of(
++                tf.newTuple(ImmutableList.of("cat", "miami", (long)18)),
++                tf.newTuple(ImmutableList.of("cat", "NULL", (long)18)),
++                tf.newTuple(ImmutableList.of("dog", "miami", (long)12)),
++                tf.newTuple(ImmutableList.of("dog", "NULL", (long)12)),
++                tf.newTuple(ImmutableList.of("NULL", "miami", (long)30)),
++                tf.newTuple(ImmutableList.of("NULL", "NULL", (long)30))
++        );
++        
++        while(it.hasNext()) {
++        	assertTrue(expected.contains(it.next()));
++        }
++
++    }
++
++    @Test
++    public void testCubeOperator5() throws IOException {
++        String query = 
++            "a = load '" + inputFile.getName() + "' as (x:chararray,y:chararray);" +
++            "b = foreach a generate x as type,y as location;" +
++            "c = cube b by (*);" + 
++            "d = foreach c generate flatten(group) as (type,location), COUNT(cube) as count;";
++
++        Util.registerMultiLineQuery(pigServer, query);
++        Iterator<Tuple> it = pigServer.openIterator("d");
++
++        Set<Tuple> expected = ImmutableSet.of(
++                tf.newTuple(ImmutableList.of("cat", "miami", (long)1)),
++                tf.newTuple(ImmutableList.of("cat", "naples", (long)1)),
++                tf.newTuple(ImmutableList.of("cat", "NULL", (long)2)),
++                tf.newTuple(ImmutableList.of("dog", "miami", (long)1)),
++                tf.newTuple(ImmutableList.of("dog", "tampa", (long)1)),
++                tf.newTuple(ImmutableList.of("dog", "naples", (long)1)),
++                tf.newTuple(ImmutableList.of("dog", "NULL", (long)3)),
++                tf.newTuple(ImmutableList.of("turtle", "tampa", (long)1)),
++                tf.newTuple(ImmutableList.of("turtle", "naples", (long)1)),
++                tf.newTuple(ImmutableList.of("turtle", "NULL", (long)2)),
++                tf.newTuple(ImmutableList.of("NULL", "miami", (long)2)),
++                tf.newTuple(ImmutableList.of("NULL", "tampa", (long)2)),
++                tf.newTuple(ImmutableList.of("NULL", "naples", (long)3)),
++                tf.newTuple(ImmutableList.of("NULL", "NULL", (long)7))
++        );
++        
++        while(it.hasNext()) {
++        	assertTrue(expected.contains(it.next()));
++        }
++
++    }
++    
++    @Test
++    public void testCubeOperator6() throws IOException {
++        String query = 
++            "a = load '" + inputFile.getName() + "' as (x:chararray,y:chararray,z:long);" +
++            "b = foreach a generate x as type,y as location, z as number;" +
++            "c = cube b by ($0..$1);" + 
++            "d = foreach c generate flatten(group) as (type,location), COUNT(cube) as count, SUM(cube.number) as total;";
++
++        Util.registerMultiLineQuery(pigServer, query);
++        Iterator<Tuple> it = pigServer.openIterator("d");
++
++        Set<Tuple> expected = ImmutableSet.of(
++                tf.newTuple(ImmutableList.of("cat", "miami", (long)1, (long)18)),
++                tf.newTuple(ImmutableList.of("cat", "naples", (long)1, (long)9)),
++                tf.newTuple(ImmutableList.of("cat", "NULL", (long)2, (long)27)),
++                tf.newTuple(ImmutableList.of("dog", "miami", (long)1, (long)12)),
++                tf.newTuple(ImmutableList.of("dog", "tampa", (long)1, (long)14)),
++                tf.newTuple(ImmutableList.of("dog", "naples", (long)1, (long)5)),
++                tf.newTuple(ImmutableList.of("dog", "NULL", (long)3, (long)31)),
++                tf.newTuple(ImmutableList.of("turtle", "tampa", (long)1, (long)4)),
++                tf.newTuple(ImmutableList.of("turtle", "naples", (long)1, (long)1)),
++                tf.newTuple(ImmutableList.of("turtle", "NULL", (long)2, (long)5)),
++                tf.newTuple(ImmutableList.of("NULL", "miami", (long)2, (long)30)),
++                tf.newTuple(ImmutableList.of("NULL", "tampa", (long)2, (long)18)),
++                tf.newTuple(ImmutableList.of("NULL", "naples", (long)3, (long)15)),
++                tf.newTuple(ImmutableList.of("NULL", "NULL", (long)7, (long)63))
++        );
++        
++        while(it.hasNext()) {
++        	assertTrue(expected.contains(it.next()));
++        }
++
++    }
++    
++    @Test
++    public void testCubeOperator7() throws IOException {
++    	// query with duplicate dimensions
++        String query = 
++            "a = load '" + inputFile.getName() + "' as (x:chararray,y:chararray,z:long);" +
++            "b = foreach a generate x as type,y as location, z as number;" +
++            "c = cube b by ($0..$1,$0..$1);" + 
++            "d = foreach c generate flatten(group), COUNT(cube) as count, SUM(cube.number) as total;";
++
++        Util.registerMultiLineQuery(pigServer, query);
++        Iterator<Tuple> it = pigServer.openIterator("d");
++
++        Set<Tuple> expected = ImmutableSet.of(
++                tf.newTuple(ImmutableList.of("cat", "miami", (long)1, (long)18)),
++                tf.newTuple(ImmutableList.of("cat", "naples", (long)1, (long)9)),
++                tf.newTuple(ImmutableList.of("cat", "NULL", (long)2, (long)27)),
++                tf.newTuple(ImmutableList.of("dog", "miami", (long)1, (long)12)),
++                tf.newTuple(ImmutableList.of("dog", "tampa", (long)1, (long)14)),
++                tf.newTuple(ImmutableList.of("dog", "naples", (long)1, (long)5)),
++                tf.newTuple(ImmutableList.of("dog", "NULL", (long)3, (long)31)),
++                tf.newTuple(ImmutableList.of("turtle", "tampa", (long)1, (long)4)),
++                tf.newTuple(ImmutableList.of("turtle", "naples", (long)1, (long)1)),
++                tf.newTuple(ImmutableList.of("turtle", "NULL", (long)2, (long)5)),
++                tf.newTuple(ImmutableList.of("NULL", "miami", (long)2, (long)30)),
++                tf.newTuple(ImmutableList.of("NULL", "tampa", (long)2, (long)18)),
++                tf.newTuple(ImmutableList.of("NULL", "naples", (long)3, (long)15)),
++                tf.newTuple(ImmutableList.of("NULL", "NULL", (long)7, (long)63))
++        );
++        
++        while(it.hasNext()) {
++        	assertTrue(expected.contains(it.next()));
++        }
++
++    }
++    
++    @Test
++    public void testCubeOperator8() throws IOException {
++        String query = 
++            "a = load '" + inputFile.getName() + "' as (x:chararray,y:chararray,z:long);" +
++            "b = filter a by x == 'dog';" +
++            "c = cube b by (x,y);" + 
++            "d = foreach c generate flatten(group), COUNT(cube) as count, SUM(cube.z) as total;";
++
++        Util.registerMultiLineQuery(pigServer, query);
++        Iterator<Tuple> it = pigServer.openIterator("d");
++
++        Set<Tuple> expected = ImmutableSet.of(
++                tf.newTuple(ImmutableList.of("dog", "miami", (long)1, (long)12)),
++                tf.newTuple(ImmutableList.of("dog", "tampa", (long)1, (long)14)),
++                tf.newTuple(ImmutableList.of("dog", "naples", (long)1, (long)5)),
++                tf.newTuple(ImmutableList.of("dog", "NULL", (long)3, (long)31)),
++                tf.newTuple(ImmutableList.of("NULL", "miami", (long)1, (long)12)),
++                tf.newTuple(ImmutableList.of("NULL", "tampa", (long)1, (long)14)),
++                tf.newTuple(ImmutableList.of("NULL", "naples", (long)1, (long)5)),
++                tf.newTuple(ImmutableList.of("NULL", "NULL", (long)3, (long)31))
++        );
++        
++        while(it.hasNext()) {
++        	assertTrue(expected.contains(it.next()));
++        }
++
++    }
++    
++    @Test
++    public void testCubeOperator9() throws IOException {
++        String query = 
++            "a = load '" + inputFile.getName() + "' as (x:chararray,y:chararray,z:long);" +
++            "b = order a by $2;" +
++            "c = cube b by (x,y);" + 
++            "d = foreach c generate flatten(group), COUNT(cube) as count, SUM(cube.z) as total;";
++
++        Util.registerMultiLineQuery(pigServer, query);
++        Iterator<Tuple> it = pigServer.openIterator("d");
++
++        Set<Tuple> expected = ImmutableSet.of(
++                tf.newTuple(ImmutableList.of("cat", "miami", (long)1, (long)18)),
++                tf.newTuple(ImmutableList.of("cat", "naples", (long)1, (long)9)),
++                tf.newTuple(ImmutableList.of("cat", "NULL", (long)2, (long)27)),
++                tf.newTuple(ImmutableList.of("dog", "miami", (long)1, (long)12)),
++                tf.newTuple(ImmutableList.of("dog", "tampa", (long)1, (long)14)),
++                tf.newTuple(ImmutableList.of("dog", "naples", (long)1, (long)5)),
++                tf.newTuple(ImmutableList.of("dog", "NULL", (long)3, (long)31)),
++                tf.newTuple(ImmutableList.of("turtle", "tampa", (long)1, (long)4)),
++                tf.newTuple(ImmutableList.of("turtle", "naples", (long)1, (long)1)),
++                tf.newTuple(ImmutableList.of("turtle", "NULL", (long)2, (long)5)),
++                tf.newTuple(ImmutableList.of("NULL", "miami", (long)2, (long)30)),
++                tf.newTuple(ImmutableList.of("NULL", "tampa", (long)2, (long)18)),
++                tf.newTuple(ImmutableList.of("NULL", "naples", (long)3, (long)15)),
++                tf.newTuple(ImmutableList.of("NULL", "NULL", (long)7, (long)63))
++        );
++        
++        while(it.hasNext()) {
++        	assertTrue(expected.contains(it.next()));
++        }
++    }
++    
++    @Test
++    public void testCubeOperator10() throws IOException {
++        String query = 
++            "a = load '" + inputFile1.getName() + "' using PigStorage(',') as (a1:chararray,b1,c1,d1); " +
++            "b = load '"+ inputFile.getName() + "' as (a2,b2,c2:long,d2:chararray);" +
++            "c = join a by a1, b by d2;" +
++            "d = cube c by ($4,$5);" + 
++            "e = foreach d generate flatten(group), COUNT(cube) as count, SUM(cube.c2) as total;";
++
++        Util.registerMultiLineQuery(pigServer, query);
++        Iterator<Tuple> it = pigServer.openIterator("e");
++
++        Set<Tuple> expected = ImmutableSet.of(
++                tf.newTuple(ImmutableList.of("cat", "miami", (long)1, (long)18)),
++                tf.newTuple(ImmutableList.of("cat", "NULL", (long)1, (long)18)),
++                tf.newTuple(ImmutableList.of("dog", "miami", (long)1, (long)12)),
++                tf.newTuple(ImmutableList.of("dog", "tampa", (long)1, (long)14)),
++                tf.newTuple(ImmutableList.of("dog", "NULL", (long)2, (long)26)),
++                tf.newTuple(ImmutableList.of("turtle", "tampa", (long)1, (long)4)),
++                tf.newTuple(ImmutableList.of("turtle", "naples", (long)1, (long)1)),
++                tf.newTuple(ImmutableList.of("turtle", "NULL", (long)2, (long)5)),
++                tf.newTuple(ImmutableList.of("NULL", "miami", (long)2, (long)30)),
++                tf.newTuple(ImmutableList.of("NULL", "tampa", (long)2, (long)18)),
++                tf.newTuple(ImmutableList.of("NULL", "naples", (long)1, (long)1)),
++                tf.newTuple(ImmutableList.of("NULL", "NULL", (long)5, (long)49))
++        );
++        
++        while(it.hasNext()) {
++        	assertTrue(expected.contains(it.next()));
++        }
++    }
++    
++    @Test
++    public void testCubeOperator11() throws IOException {
++        String query = 
++            "a = load '" + inputFile1.getName() + "' using PigStorage(',') as (a1:chararray,b1,c1,d1); " +
++            "b = load '"+ inputFile.getName() + "' as (a2,b2,c2:long,d2:chararray);" +
++            "c = cogroup a by a1, b by d2;" +
++            "d = foreach c generate flatten(a), flatten(b);" +
++            "e = cube d by (a2,b2);" +
++            "f = foreach e generate flatten(group), COUNT(cube) as count, SUM(cube.c2) as total;";
++
++        Util.registerMultiLineQuery(pigServer, query);
++        Iterator<Tuple> it = pigServer.openIterator("f");
++
++        Set<Tuple> expected = ImmutableSet.of(
++                tf.newTuple(ImmutableList.of("cat", "miami", (long)1, (long)18)),
++                tf.newTuple(ImmutableList.of("cat", "NULL", (long)1, (long)18)),
++                tf.newTuple(ImmutableList.of("dog", "miami", (long)1, (long)12)),
++                tf.newTuple(ImmutableList.of("dog", "tampa", (long)1, (long)14)),
++                tf.newTuple(ImmutableList.of("dog", "NULL", (long)2, (long)26)),
++                tf.newTuple(ImmutableList.of("turtle", "tampa", (long)1, (long)4)),
++                tf.newTuple(ImmutableList.of("turtle", "naples", (long)1, (long)1)),
++                tf.newTuple(ImmutableList.of("turtle", "NULL", (long)2, (long)5)),
++                tf.newTuple(ImmutableList.of("NULL", "miami", (long)2, (long)30)),
++                tf.newTuple(ImmutableList.of("NULL", "tampa", (long)2, (long)18)),
++                tf.newTuple(ImmutableList.of("NULL", "naples", (long)1, (long)1)),
++                tf.newTuple(ImmutableList.of("NULL", "NULL", (long)5, (long)49))
++        );
++        
++        while(it.hasNext()) {
++        	assertTrue(expected.contains(it.next()));
++        }
++    }
++}
+Index: test/org/apache/pig/parser/TestQueryLexer.java
+===================================================================
+--- test/org/apache/pig/parser/TestQueryLexer.java	(revision 1303571)
++++ test/org/apache/pig/parser/TestQueryLexer.java	(working copy)
+@@ -48,7 +48,7 @@
+         
+         // While we can check more conditions, such as type of each token, for now I think the following
+         // is enough. If the token type is wrong, it will be most likely caught by the parser.
+-        Assert.assertEquals( 400, tokenCount );
++        Assert.assertEquals( 415, tokenCount );
+         Assert.assertEquals( 0, lexer.getNumberOfSyntaxErrors() );
+     }
+     
+Index: test/org/apache/pig/parser/TestLexer.pig
+===================================================================
+--- test/org/apache/pig/parser/TestLexer.pig	(revision 1303571)
++++ test/org/apache/pig/parser/TestLexer.pig	(working copy)
+@@ -62,6 +62,8 @@
+ 
+ I = foreach A generate flatten(B::c);
+ 
++J = CUBE A BY ($0, $1, $2, $3);
++
+ CMD = `ls -l`;
+ A = stream through CMD;
+ 
+Index: test/org/apache/pig/parser/TestQueryParser.java
+===================================================================
+--- test/org/apache/pig/parser/TestQueryParser.java	(revision 1303571)
++++ test/org/apache/pig/parser/TestQueryParser.java	(working copy)
+@@ -176,8 +176,72 @@
+                        "store c into '/user/pig/out/jianyong.1297305352/Order_17.out';";
+         shouldPass( query );
+     }
++
++    @Test
++    public void testCubeNegative1() throws IOException, RecognitionException {
++    	String query = "x = load 'cubedata' as (a, b, c, d); " +
++    				   "cube = cube x by (a, b, c);";
++    	shouldFail( query );
++    }
+     
+     @Test
++    public void testCubeNegative2() throws IOException, RecognitionException {
++    	String query = "x = load 'cubedata' as (a, b, c, d); " +
++    				   "y = cube x by a, b, c;";
++    	shouldFail( query );
++    }
++    
++    @Test
++    public void testCubeNegative3() throws IOException, RecognitionException {
++    	String query = "x = load 'cubedata' as (a, b, c, d); " +
++    				   "y = cube x (a, b, c);";
++    	shouldFail( query );
++    }
++    
++    @Test
++    public void testCubeNegative4() throws IOException, RecognitionException {
++    	String query = "x = load 'cubedata' as (a, b, c, d); " +
++    				   "y = cube x by (a, b, c), UDF(c);";
++    	shouldFail( query );
++    }
++    
++    @Test
++    public void testCubePositive1() throws IOException, RecognitionException {
++    	String query = "x = load 'cubedata' as (a, b, c, d);" + 
++    				   "y = cube x by (a, b, c);" +
++    				   "z = foreach y generate flatten(group) as (a, b, c), COUNT(x) as count;" +
++    				   "store z into 'cube_output';";
++    	shouldPass( query );
++    }
++    
++    @Test
++    public void testCubePositive2() throws IOException, RecognitionException {
++    	String query = "x = load 'cubedata' as (a, b, c, d);" + 
++    				   "y = cube x by (*);" +
++    				   "z = foreach y generate flatten(group) as (a, b, c, d), COUNT(x) as count;" +
++    				   "store z into 'cube_output';";
++    	shouldPass( query );
++    }
++    
++    @Test
++    public void testCubePositive3() throws IOException, RecognitionException {
++    	String query = "x = load 'cubedata' as (a, b, c, d);" + 
++    				   "y = cube x by (2-4);" +
++    				   "z = foreach y generate flatten(group) as (b, c, d), COUNT(x) as count;" +
++    				   "store z into 'cube_output';";
++    	shouldPass( query );
++    }
++    
++    @Test
++    public void testCubePositive4() throws IOException, RecognitionException {
++    	String query = "x = load 'cubedata' as (a, b, c, d);" + 
++    				   "y = cube x by ($0, $1);" +
++    				   "z = foreach y generate flatten(group) as (a, b), COUNT(x) as count;" +
++    				   "store z into 'cube_output';";
++    	shouldPass( query );
++    }
++    
++    @Test
+     public void test9() throws IOException, RecognitionException {
+         String query = "a = load 'x' as (u,v);" +
+                        "b = load 'y' as (u,w);" +
+Index: test/org/apache/pig/parser/TestParser.pig
+===================================================================
+--- test/org/apache/pig/parser/TestParser.pig	(revision 1303571)
++++ test/org/apache/pig/parser/TestParser.pig	(working copy)
+@@ -65,6 +65,10 @@
+ grpInactiveAcct = group inactiveAccounts all;
+ B = GROUP A ALL using 'collected';
+ 
++--cube
++C = CUBE A BY (a, b);
++CC = CUBE A BY (*);
++
+ --join
+ E = join A by $0, B by $0 using 'replicated';
+ H = join A by u, B by u;
+Index: test/org/apache/pig/parser/TestLogicalPlanGenerator.java
+===================================================================
+--- test/org/apache/pig/parser/TestLogicalPlanGenerator.java	(revision 1303571)
++++ test/org/apache/pig/parser/TestLogicalPlanGenerator.java	(working copy)
+@@ -299,6 +299,38 @@
+     }
+     
+     @Test
++    public void test26() {
++    	String query = 
++                "a = load 'input' as (x:chararray,y:chararray,z:long);" + 
++                "b = cube a by (x,y);" + 
++                "c = foreach b generate flatten(group) as (x,y), COUNT(cube) as count, SUM(cube.z) as total;" +
++                "store c into 'output';";
++    	generateLogicalPlan( query );
++    }
++    
++    @Test
++    public void test27() {
++        String query = "a = load 'input' as (x:chararray,y:chararray,z:long);" +
++		        "a = load 'input' as (x,y:chararray,z:long);" +
++		        "a = load 'input' as (x:chararray,y:chararray,z:long);" +
++		        "b = cube a by (x,y);" + 
++		        "c = foreach b generate flatten(group) as (x,y), COUNT(cube) as count, SUM(cube.z) as total;" +
++		        "store c into 'c';";
++    	generateLogicalPlan( query );
++    }
++    
++    @Test
++    public void test28() {
++        String query = 
++                "a = load 'input' as (x:chararray,y:chararray,z:long);" +
++                "b = foreach a generate x as type,y as location,z as number;" +
++                "c = cube b by (type,location);" + 
++                "d = foreach c generate flatten(group) as (type,location), COUNT(cube) as count, SUM(cube.number) as total;" +
++                "store d into 'd';";
++    	generateLogicalPlan( query );
++    }
++    
++    @Test
+     public void testFilter() {
+         String query = "A = load 'x' as ( u:int, v:long, w:bytearray); " + 
+                        "B = filter A by 2 > 1;\n" +
+Index: src/org/apache/pig/parser/AstPrinter.g
+===================================================================
+--- src/org/apache/pig/parser/AstPrinter.g	(revision 1303571)
++++ src/org/apache/pig/parser/AstPrinter.g	(working copy)
+@@ -97,6 +97,7 @@
+           | mr_clause
+           | split_clause
+           | foreach_clause
++          | cube_clause
+ ;
+ 
+ define_clause 
+@@ -204,6 +205,23 @@
+         (b=QUOTEDSTRING { sb.append(", ").append($b.text); } )*
+ ;
+ 
++cube_clause
++  : ^( CUBE { sb.append($CUBE.text).append(" "); } cube_item ( { sb.append(", "); } cube_item )* )
++;
++
++cube_item
++  : rel ( join_cube_by_clause )
++;
++
++join_cube_by_clause
++    : ^( BY { sb.append(" ").append($BY.text).append(" ("); } 
++    join_cube_by_expr ( { sb.append(", "); } join_cube_by_expr )* { sb.append(")"); } )
++;
++
++join_cube_by_expr 
++    : col_range | expr | STAR { sb.append($STAR.text); }
++;
++
+ group_clause
+     : ^( ( GROUP { sb.append($GROUP.text).append(" "); } | COGROUP { sb.append($COGROUP.text).append(" "); } ) 
+         group_item ( { sb.append(", "); } group_item )* 
+@@ -304,6 +322,7 @@
+ 
+ col_alias 
+     : GROUP { sb.append($GROUP.text); }
++    | CUBE { sb.append($CUBE.text); }
+     | IDENTIFIER { sb.append($IDENTIFIER.text); }
+ ;
+ 
+@@ -494,6 +513,7 @@
+ 
+ alias_col_ref 
+     : GROUP { sb.append($GROUP.text); }
++    | CUBE { sb.append($CUBE.text); }
+     | IDENTIFIER { sb.append($IDENTIFIER.text); }
+ ;
+ 
+@@ -552,6 +572,7 @@
+     | LOAD      { sb.append($LOAD.text); }
+     | FILTER    { sb.append($FILTER.text); }
+     | FOREACH   { sb.append($FOREACH.text); }
++    | CUBE      { sb.append($CUBE.text); }
+     | MATCHES   { sb.append($MATCHES.text); }
+     | ORDER     { sb.append($ORDER.text); }
+     | DISTINCT  { sb.append($DISTINCT.text); }
+Index: src/org/apache/pig/parser/AliasMasker.g
+===================================================================
+--- src/org/apache/pig/parser/AliasMasker.g	(revision 1303571)
++++ src/org/apache/pig/parser/AliasMasker.g	(working copy)
+@@ -130,6 +130,7 @@
+           | mr_clause
+           | split_clause
+           | foreach_clause
++          | cube_clause
+ ;
+ 
+ define_clause 
+@@ -236,6 +237,22 @@
+     : QUOTEDSTRING+ 
+ ;
+ 
++cube_clause
++  : ^( CUBE cube_item+ )
++;
++
++cube_item
++  : rel ( join_cube_by_clause )
++;
++
++join_cube_by_clause
++    : ^( BY join_cube_by_expr+ )
++;
++
++join_cube_by_expr 
++    : col_range | expr | STAR 
++;
++
+ group_clause
+     : ^( ( GROUP | COGROUP ) group_item+ group_type? partition_clause? )
+ ;
+@@ -332,7 +349,8 @@
+ ;
+ 
+ col_alias 
+-    : GROUP 
++    : GROUP
++    | CUBE 
+     | IDENTIFIER
+ ;
+ 
+@@ -507,6 +525,7 @@
+ 
+ alias_col_ref 
+     : GROUP 
++    | CUBE
+     | IDENTIFIER
+       {
+           String alias = $IDENTIFIER.text;
+@@ -570,6 +589,7 @@
+     | LOAD
+     | FILTER
+     | FOREACH
++    | CUBE
+     | MATCHES
+     | ORDER
+     | DISTINCT
+Index: src/org/apache/pig/parser/LogicalPlanGenerator.g
+===================================================================
+--- src/org/apache/pig/parser/LogicalPlanGenerator.g	(revision 1303571)
++++ src/org/apache/pig/parser/LogicalPlanGenerator.g	(working copy)
+@@ -78,6 +78,7 @@
+ import org.apache.pig.newplan.logical.expression.SubtractExpression;
+ import org.apache.pig.newplan.logical.expression.UserFuncExpression;
+ import org.apache.pig.newplan.logical.relational.LOCogroup;
++import org.apache.pig.newplan.logical.relational.LOCube;
+ import org.apache.pig.newplan.logical.relational.LOFilter;
+ import org.apache.pig.newplan.logical.relational.LOForEach;
+ import org.apache.pig.newplan.logical.relational.LOGenerate;
+@@ -218,6 +219,7 @@
+           | stream_clause { $alias = $stream_clause.alias; }
+           | mr_clause { $alias = $mr_clause.alias; }
+           | foreach_clause { $alias = $foreach_clause.alias; }
++          | cube_clause { $alias = $cube_clause.alias; }
+ ;
+ 
+ define_clause 
+@@ -464,6 +466,60 @@
+   )+
+ ;
+ 
++cube_clause returns[String alias]
++scope {
++  LOCube cubeOp;
++  MultiMap<Integer, LogicalExpressionPlan> cubePlans;
++  int inputIndex;
++}
++scope GScope;
++@init {
++  $cube_clause::cubeOp = builder.createCubeOp();
++  $GScope::currentOp = $cube_clause::cubeOp;
++  $cube_clause::cubePlans = new MultiMap<Integer, LogicalExpressionPlan>();
++  int oldStatementIndex = $statement::inputIndex;
++}
++@after { $statement::inputIndex = oldStatementIndex; }
++ : ^( CUBE cube_item+ )
++ {
++  SourceLocation loc = new SourceLocation( (PigParserNode)$cube_clause.start );
++  $alias = builder.buildCubeOp( loc, $cube_clause::cubeOp, $statement::alias, 
++    $statement::inputAlias, $cube_clause::cubePlans );
++ }
++;
++
++cube_item
++ : rel ( join_cube_by_clause 
++     { 
++            $cube_clause::cubePlans.put( $cube_clause::inputIndex, $join_cube_by_clause.plans );
++     }
++  )
++  {
++     $cube_clause::inputIndex++;
++     $statement::inputIndex++;  
++  }
++;
++
++join_cube_by_clause returns[List<LogicalExpressionPlan> plans]
++@init {
++    $plans = new ArrayList<LogicalExpressionPlan>();
++}
++ : ^( BY ( join_cube_by_expr { $plans.add( $join_cube_by_expr.plan ); } )+ )
++;
++
++join_cube_by_expr returns[LogicalExpressionPlan plan]
++@init {
++    $plan = new LogicalExpressionPlan();
++}
++ : col_range[$plan]
++ | expr[$plan]
++ | STAR 
++   {
++       builder.buildProjectExpr( new SourceLocation( (PigParserNode)$STAR ), $plan, $GScope::currentOp, 
++           $statement::inputIndex, null, -1 );
++   }
++;
++
+ group_clause returns[String alias]
+ scope {
+     MultiMap<Integer, LogicalExpressionPlan> groupPlans;
+@@ -882,6 +938,7 @@
+ 
+ col_alias returns[Object col]
+  : GROUP { $col = $GROUP.text; }
++ | CUBE { $col = $CUBE.text; }
+  | IDENTIFIER { $col = $IDENTIFIER.text; }
+ ;
+ 
+@@ -1430,6 +1487,11 @@
+        $expr = builder.buildProjectExpr( new SourceLocation( (PigParserNode)$GROUP ), $plan, $GScope::currentOp, 
+            $statement::inputIndex, $GROUP.text, 0 );
+    }
++ | CUBE 
++   {
++       $expr = builder.buildProjectExpr( new SourceLocation( (PigParserNode)$CUBE ), $plan, $GScope::currentOp, 
++           $statement::inputIndex, $CUBE.text, 0 );
++   }
+  | IDENTIFIER
+    {
+        SourceLocation loc = new SourceLocation( (PigParserNode)$IDENTIFIER );
+Index: src/org/apache/pig/parser/AstValidator.g
+===================================================================
+--- src/org/apache/pig/parser/AstValidator.g	(revision 1303571)
++++ src/org/apache/pig/parser/AstValidator.g	(working copy)
+@@ -145,6 +145,7 @@
+           | mr_clause
+           | split_clause
+           | foreach_clause
++          | cube_clause
+ ;
+ 
+ define_clause : ^( DEFINE alias ( cmd | func_clause ) )
+@@ -255,6 +256,22 @@
+ func_args : func_args_string+
+ ;
+ 
++cube_clause
++  : ^( CUBE cube_item+ )
++;
++
++cube_item
++  : rel ( join_cube_by_clause )
++;
++
++join_cube_by_clause
++    : ^( BY join_cube_by_expr+ )
++;
++
++join_cube_by_expr 
++    : col_range | expr | STAR 
++;
++
+ group_clause
+ scope {
+     int arity;
+@@ -345,7 +362,7 @@
+ col_alias_or_index : col_alias | col_index
+ ;
+ 
+-col_alias : GROUP | IDENTIFIER
++col_alias : GROUP | CUBE | IDENTIFIER
+ ;
+ 
+ col_index : DOLLARVAR
+@@ -523,7 +540,7 @@
+ col_ref : alias_col_ref | dollar_col_ref
+ ;
+ 
+-alias_col_ref : GROUP | IDENTIFIER
++alias_col_ref : GROUP | CUBE | IDENTIFIER
+ ;
+ 
+ dollar_col_ref : DOLLARVAR
+@@ -564,6 +581,7 @@
+     | LOAD
+     | FILTER
+     | FOREACH
++    | CUBE
+     | MATCHES
+     | ORDER
+     | DISTINCT
+Index: src/org/apache/pig/parser/QueryLexer.g
+===================================================================
+--- src/org/apache/pig/parser/QueryLexer.g	(revision 1303571)
++++ src/org/apache/pig/parser/QueryLexer.g	(working copy)
+@@ -81,6 +81,9 @@
+ ORDER   :  'ORDER'
+ ;
+ 
++CUBE : 'CUBE'
++;
++
+ DISTINCT : 'DISTINCT'
+ ;
+ 
+Index: src/org/apache/pig/parser/QueryParser.g
+===================================================================
+--- src/org/apache/pig/parser/QueryParser.g	(revision 1303571)
++++ src/org/apache/pig/parser/QueryParser.g	(working copy)
+@@ -215,6 +215,7 @@
+ op_clause : define_clause 
+           | load_clause
+           | group_clause
++          | cube_clause
+           | store_clause
+           | filter_clause
+           | distinct_clause
+@@ -470,7 +471,7 @@
+ col_alias_or_index : col_alias | col_index
+ ;
+ 
+-col_alias : GROUP | identifier
++col_alias : GROUP | CUBE | identifier
+ ;
+ 
+ col_index : DOLLARVAR
+@@ -574,6 +575,28 @@
+                     -> ^( FOREACH_PLAN_COMPLEX nested_blk )
+ ;
+ 
++cube_clause 
++  : CUBE^ cube_item_list 
++;
++
++cube_item_list : cube_item ( COMMA cube_item )*
++               -> cube_item+
++;
++
++cube_item : rel ( join_cube_by_clause )
++;
++
++join_cube_by_clause : BY^ join_cube_by_expr_list
++;
++
++join_cube_by_expr_list : LEFT_PAREN join_cube_by_expr ( COMMA join_cube_by_expr )* RIGHT_PAREN
++                       -> join_cube_by_expr+
++                        | join_cube_by_expr
++;
++
++join_cube_by_expr : col_range  | expr | STAR
++;
++
+ nested_blk : LEFT_CURLY! nested_command_list ( generate_clause SEMI_COLON! ) RIGHT_CURLY!
+ ;
+ 
+@@ -656,7 +679,7 @@
+ col_ref : alias_col_ref | dollar_col_ref
+ ;
+ 
+-alias_col_ref : GROUP | identifier
++alias_col_ref : GROUP | CUBE | identifier
+ ;
+ 
+ dollar_col_ref : DOLLARVAR
+@@ -708,6 +731,7 @@
+     | LOAD
+     | FILTER
+     | FOREACH
++    | CUBE
+     | ORDER
+     | DISTINCT
+     | COGROUP
+Index: src/org/apache/pig/parser/LogicalPlanBuilder.java
+===================================================================
+--- src/org/apache/pig/parser/LogicalPlanBuilder.java	(revision 1303571)
++++ src/org/apache/pig/parser/LogicalPlanBuilder.java	(working copy)
+@@ -36,6 +36,7 @@
+ import org.apache.pig.StoreFuncInterface;
+ import org.apache.pig.backend.executionengine.ExecException;
+ import org.apache.pig.backend.hadoop.datastorage.ConfigurationUtil;
++import org.apache.pig.builtin.CubeDimensions;
+ import org.apache.pig.builtin.PigStorage;
+ import org.apache.pig.builtin.RANDOM;
+ import org.apache.pig.data.BagFactory;
+@@ -67,6 +68,7 @@
+ import org.apache.pig.newplan.logical.relational.LOCogroup;
+ import org.apache.pig.newplan.logical.relational.LOCogroup.GROUPTYPE;
+ import org.apache.pig.newplan.logical.relational.LOCross;
++import org.apache.pig.newplan.logical.relational.LOCube;
+ import org.apache.pig.newplan.logical.relational.LODistinct;
+ import org.apache.pig.newplan.logical.relational.LOFilter;
+ import org.apache.pig.newplan.logical.relational.LOForEach;
+@@ -365,6 +367,232 @@
+         return alias;
+     }
+ 
++    LOCube createCubeOp() {
++    	return new LOCube( plan );
++    }
++    
++    String buildCubeOp(SourceLocation loc, LOCube op, String alias, String inputAlias, MultiMap<Integer, 
++    		LogicalExpressionPlan> expressionPlans) throws ParserValidationException {
++  
++    	//set the expression plans for cube operator and build cube operator 
++        op.setExpressionPlans( expressionPlans );
++        buildOp(loc, op, alias, inputAlias, null);
++        try {
++            (new ProjectStarExpander(op.getPlan())).visit(op);
++            (new ProjStarInUdfExpander(op.getPlan())).visit(op);
++            new SchemaResetter(op.getPlan(), true).visit(op);
++        } catch (FrontendException e) {
++            throw new ParserValidationException( intStream, loc, e );
++        }
++        
++        return convertCubeToFGPlan( loc, op, inputAlias, op.getExpressionPlans());
++    }
++    
++     // This function creates logical plan for foreach and groupby operators. 
++     // It connects the predecessors of cube operator with foreach plan and
++     // disconnects cube operator from the logical plan. It also connects foreach
++     // plan with groupby plan.
++    private String convertCubeToFGPlan( SourceLocation loc, LOCube op, String inputAlias, MultiMap<Integer, 
++    			LogicalExpressionPlan> expressionPlans) throws ParserValidationException {
++
++    	LOForEach foreach = new LOForEach(plan);
++    	LOCogroup groupby = new LOCogroup(plan);
++		LogicalPlan innerPlan = new LogicalPlan();
++    	LogicalRelationalOperator gen = new LOGenerate(innerPlan);
++    	
++    	// connect the foreach operator with predecessors of cube operator
++    	List<Operator> ops = op.getPlan().getPredecessors(op);
++        for ( Operator lop : ops ){
++                OperatorPlan foreachPlan = foreach.getPlan();
++                foreachPlan.connect(lop, (Operator)foreach);
++        }
++        
++        // disconnect the cube operator from the plan 
++        ops = foreach.getPlan().getPredecessors(foreach);
++        for ( Operator lop : ops ){
++                List<Operator> succs = lop.getPlan().getSuccessors(lop);
++                for ( Operator ls : succs ){
++                        try {
++                                if( ls instanceof LOCube ) {
++                                        ls.getPlan().disconnect(lop, ls);
++                                        ls.getPlan().remove(ls);
++                                }
++                        } catch (FrontendException e) {
++                                throw new ParserValidationException( intStream, loc, e );
++                        }
++                }
++        }
++        
++    	// Get schema from predecessors of foreach and construct 
++    	// projection expression for each attributes (dimension and dependent). 
++    	// Dimensions attributes will be attached to UDF and dependent attributes
++    	// will be retained as such in the output schema. 
++    	List<Operator> srcs = foreach.getPlan().getPredecessors(foreach);
++    	List<LogicalExpressionPlan> allExprPlan = new ArrayList<LogicalExpressionPlan>();
++    	for ( Operator src : srcs ){
++    		LogicalSchema srcsc = new LogicalSchema();
++    		
++    		try {
++				srcsc = ((LogicalRelationalOperator)src).getSchema();
++			} catch (FrontendException e) {
++				throw new ParserValidationException( intStream, loc, e );
++			}
++    		if( srcsc != null ) {
++	    		ArrayList<LogicalFieldSchema> fields = (ArrayList<LogicalFieldSchema>) srcsc.getFields();
++	    		for (int i = 0; i < fields.size(); i++ )
++	    		{
++	    			LogicalExpressionPlan lEplan = new LogicalExpressionPlan();
++	                new ProjectExpression(lEplan, i, fields.get(i).alias, gen);
++	                allExprPlan.add(lEplan);
++	    		}
++    		}
++    	}
++				
++    	// Pops the logical expression plan from input multimap that contains dimension columns. 
++    	// The list of dimension columns will be used as input args to CubeDimensions UDF.
++    	List<LogicalExpressionPlan> lExprPlan = new ArrayList<LogicalExpressionPlan>();
++		List<LogicalExpression> lExpr = new ArrayList<LogicalExpression>();
++		LogicalExpression logExpr = null;
++		lExprPlan.addAll(expressionPlans.get(0));
++		
++		try {
++			removeDuplicates(lExprPlan);
++		} catch (FrontendException e) {
++			throw new ParserValidationException( intStream, loc, e );
++		}
++		
++    	// Construct LogicalExpression (specifically ProjectExpression) from the LogicalExpressionPlans
++    	for( int i=0; i < lExprPlan.size(); i++ ) {
++    		LogicalExpressionPlan exp = lExprPlan.get(i);
++    		logExpr = (LogicalExpression) exp.getSources().get(0);
++    		Iterator<Operator> opers = exp.getOperators();
++    		
++    		// ProjExpr are initially attached to CubeOp. So re-attach it to GenerateOp 
++    		while(opers.hasNext())
++    		{
++    			Operator op1 = opers.next();
++    			if ( op1 instanceof ProjectExpression == true ) {
++    				((ProjectExpression)op1).setAttachedRelationalOp(gen);
++    			}
++    			else {
++    				throw new ParserValidationException( intStream, loc, "Column projection expected." );
++    			}
++    		}
++    		
++    		lExpr.add(logExpr);
++    		
++    		// Remove the dimension attributes attached earlier from the 
++    		// expression plan as they will be attached to UserFuncExpression. 
++    		// The expression plan will retain the dependent attributes 
++    		for ( int j = 0 ; j < allExprPlan.size(); j++ )
++    		{
++    			LogicalExpressionPlan tExprP = allExprPlan.get(j);
++    			LogicalExpression texp = (LogicalExpression) tExprP.getSources().get(0);
++    			
++    			String colAlias = ((ProjectExpression)logExpr).getColAlias();
++    			if( colAlias == null ) {
++    				try {
++						colAlias = ((ProjectExpression)logExpr).getFieldSchema().alias;
++					} catch (FrontendException e) {
++						throw new ParserValidationException( intStream, loc, "Column alias could not be determined." );
++					}
++    			}
++    			
++    		    if ( colAlias.equals(((ProjectExpression)texp).getColAlias()) == true ) {
++    		    	allExprPlan.remove(j);
++    		    }
++    		}
++    		
++    	}
++    
++    	// Attach CubeDimesions UDF with project expressions to logical expression plan 
++    	LogicalExpressionPlan expr = new LogicalExpressionPlan();
++    	new UserFuncExpression(expr, new FuncSpec( CubeDimensions.class.getName(), "NULL"), lExpr);
++    	for( LogicalExpressionPlan exp : lExprPlan) {
++    		Iterator<Operator> it = exp.getOperators();
++    		while( it.hasNext() )
++    		{
++    			expr.add(it.next());
++    		}
++    	}
++    	// Add the UDF to logical expression plan that contains dependent attributes 
++    	allExprPlan.add(0, expr);
++		
++		// If the operator is a UserFuncExpression then set the flatten flags.
++    	List<Boolean> flattenFlags = new ArrayList<Boolean>();
++    	for (int i = 0; i < allExprPlan.size(); i++) {
++			List<Operator> srcs1 = allExprPlan.get(i).getSources();
++			for( Operator src : srcs1 )
++			{
++				if(  src instanceof ProjectExpression ) {
++					flattenFlags.add(false);
++				}
++				else if( src instanceof UserFuncExpression ) {
++					flattenFlags.add(true);
++				}
++			}
++    	}
++		// Generate operator is generated for the foreach plan 
++		buildGenerateOp(null, foreach, (LOGenerate) gen, operators , allExprPlan, flattenFlags, null);
++
++		String falias = buildForeachOp(null, foreach, "cube", inputAlias, innerPlan);
++
++		List<Boolean> innerFlags = new ArrayList<Boolean>();
++		List<String> inpAliases= new ArrayList<String>();
++		inpAliases.add(falias);
++		innerFlags.add(false);
++		
++		// Get the output schema of foreach operator and reconstruct the 
++		// LogicalExpressionPlan for each dimensional attributes 
++		MultiMap<Integer, LogicalExpressionPlan> exprPlansCopy = 
++				new MultiMap<Integer, LogicalExpressionPlan>();
++		LogicalSchema fSchema = null;
++		try {
++			fSchema = foreach.getSchema();
++		} catch (FrontendException e) {
++			throw new ParserValidationException( intStream, loc, e );
++		}
++		
++		List<LogicalFieldSchema> lfSchemas = fSchema.getFields();
++		for( LogicalFieldSchema lfSchema : lfSchemas )
++		{
++			LogicalExpressionPlan epGrp = new LogicalExpressionPlan();
++			if( lfSchema.alias.contains("dimensions::") == true) {
++				new ProjectExpression(epGrp, 0, lfSchema.alias, groupby);
++				exprPlansCopy.put(0, epGrp);
++			}	
++		}
++	
++		// build group by operator 
++		return buildGroupOp(null, (LOCogroup)groupby, op.getAlias(), inpAliases, exprPlansCopy, 
++													GROUPTYPE.REGULAR, innerFlags, null);
++	}
++
++	private void removeDuplicates(List<LogicalExpressionPlan> lExprPlan) throws FrontendException {
++		
++		for( int i = 0; i < lExprPlan.size(); i++ ) {
++			for( int j = i+1; j < lExprPlan.size(); j++ ) {
++				LogicalExpression outer = (LogicalExpression) lExprPlan.get(i).getSources().get(0);
++				LogicalExpression inner = (LogicalExpression) lExprPlan.get(j).getSources().get(0);
++				String outColAlias = ((ProjectExpression)outer).getColAlias();
++				String inColAlias = ((ProjectExpression)inner).getColAlias();
++				
++				if(outColAlias == null) {
++					outColAlias = outer.getFieldSchema().alias;
++				}
++				
++				if(inColAlias == null) {
++					inColAlias = inner.getFieldSchema().alias;
++				}
++				
++				if(outColAlias.equals(inColAlias) == true){
++					lExprPlan.remove(j);
++				}
++			}
++		}
++		
++	}
++	
+     LOCogroup createGroupOp() {
+         return new LOCogroup( plan );
+     }
+Index: src/org/apache/pig/newplan/logical/visitor/ProjectStarExpander.java
+===================================================================
+--- src/org/apache/pig/newplan/logical/visitor/ProjectStarExpander.java	(revision 1303571)
++++ src/org/apache/pig/newplan/logical/visitor/ProjectStarExpander.java	(working copy)
+@@ -37,6 +37,7 @@
+ import org.apache.pig.newplan.logical.expression.LogicalExpressionVisitor;
+ import org.apache.pig.newplan.logical.expression.ProjectExpression;
+ import org.apache.pig.newplan.logical.relational.LOCogroup;
++import org.apache.pig.newplan.logical.relational.LOCube;
+ import org.apache.pig.newplan.logical.relational.LOForEach;
+ import org.apache.pig.newplan.logical.relational.LOGenerate;
+ import org.apache.pig.newplan.logical.relational.LOInnerLoad;
+@@ -188,7 +189,17 @@
+ 
+     }
+ 
++    @Override
++    public void visit(LOCube cu) throws FrontendException{
++        
++        MultiMap<Integer, LogicalExpressionPlan> inpExprPlans = 
++            cu.getExpressionPlans();
++ 
++        //modify the plans if they have project-star
++        expandPlans(inpExprPlans);
+ 
++    }
++
+     @Override
+     public void visit(LOJoin join) throws FrontendException{
+         expandPlans(join.getExpressionPlans());
+Index: src/org/apache/pig/newplan/logical/optimizer/AllExpressionVisitor.java
+===================================================================
+--- src/org/apache/pig/newplan/logical/optimizer/AllExpressionVisitor.java	(revision 1303571)
++++ src/org/apache/pig/newplan/logical/optimizer/AllExpressionVisitor.java	(working copy)
+@@ -27,6 +27,7 @@
+ import org.apache.pig.newplan.logical.expression.LogicalExpressionPlan;
+ import org.apache.pig.newplan.logical.expression.LogicalExpressionVisitor;
+ import org.apache.pig.newplan.logical.relational.LOCogroup;
++import org.apache.pig.newplan.logical.relational.LOCube;
+ import org.apache.pig.newplan.logical.relational.LOFilter;
+ import org.apache.pig.newplan.logical.relational.LOForEach;
+ import org.apache.pig.newplan.logical.relational.LOGenerate;
+@@ -91,6 +92,19 @@
+     }
+     
+     @Override
++    public void visit(LOCube cu) throws FrontendException {
++        currentOp = cu;
++        MultiMap<Integer, LogicalExpressionPlan> expressionPlans = cu.getExpressionPlans();
++        for( Integer key : expressionPlans.keySet() ) {
++            Collection<LogicalExpressionPlan> exprPlans = expressionPlans.get(key);
++            for( LogicalExpressionPlan plan : exprPlans ) {
++                LogicalExpressionVisitor v = getVisitor(plan);
++                v.visit();
++            }
++        }
++    }
++    
++    @Override
+     public void visit(LOCogroup cg) throws FrontendException {
+         currentOp = cg;
+         MultiMap<Integer, LogicalExpressionPlan> expressionPlans = cg.getExpressionPlans();
+Index: src/org/apache/pig/newplan/logical/optimizer/SchemaResetter.java
+===================================================================
+--- src/org/apache/pig/newplan/logical/optimizer/SchemaResetter.java	(revision 1303571)
++++ src/org/apache/pig/newplan/logical/optimizer/SchemaResetter.java	(working copy)
+@@ -35,6 +35,7 @@
+ import org.apache.pig.newplan.logical.expression.LogicalExpressionPlan;
+ import org.apache.pig.newplan.logical.relational.LOCogroup;
+ import org.apache.pig.newplan.logical.relational.LOCross;
++import org.apache.pig.newplan.logical.relational.LOCube;
+ import org.apache.pig.newplan.logical.relational.LODistinct;
+ import org.apache.pig.newplan.logical.relational.LOFilter;
+ import org.apache.pig.newplan.logical.relational.LOForEach;
+@@ -128,8 +129,19 @@
+         load.getProjection().resetFieldSchema();
+         load.getSchema();
+     }
+-
++    
+     @Override
++    public void visit(LOCube loCube) throws FrontendException {
++        loCube.resetSchema();
++        MultiMap<Integer, LogicalExpressionPlan> expPlans = loCube.getExpressionPlans();
++        for (LogicalExpressionPlan expPlan : expPlans.values()) {
++            FieldSchemaResetter fsResetter = new FieldSchemaResetter(expPlan);
++            fsResetter.visit();
++        }
++        validate(loCube.getSchema());
++    }
++    
++    @Override
+     public void visit(LOCogroup loCogroup) throws FrontendException {
+         loCogroup.resetSchema();
+         MultiMap<Integer, LogicalExpressionPlan> expPlans = loCogroup.getExpressionPlans();
+Index: src/org/apache/pig/newplan/logical/relational/LOCube.java
+===================================================================
+--- src/org/apache/pig/newplan/logical/relational/LOCube.java	(revision 0)
++++ src/org/apache/pig/newplan/logical/relational/LOCube.java	(revision 0)
+@@ -0,0 +1,133 @@
++/*
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package org.apache.pig.newplan.logical.relational;
++
++import java.util.ArrayList;
++import java.util.Collection;
++import java.util.HashMap;
++import java.util.List;
++import java.util.Map;
++
++import org.apache.pig.impl.logicalLayer.FrontendException;
++import org.apache.pig.impl.util.MultiMap;
++import org.apache.pig.newplan.Operator;
++import org.apache.pig.newplan.OperatorPlan;
++import org.apache.pig.newplan.PlanVisitor;
++import org.apache.pig.newplan.logical.expression.LogicalExpressionPlan;
++import org.apache.pig.newplan.logical.relational.LogicalSchema.LogicalFieldSchema;
++
++public class LOCube extends LogicalRelationalOperator {
++
++	/* cube operator syntax
++	 * alias = CUBE rel BY (col_ref)
++	 * alias - output alias with a schema
++	 * CUBE - operator
++	 * rel - input relation
++	 * BY - operator 
++	 * col_ref - column references or * or range in the schema referred by rel 
++	 * */
++	
++    private MultiMap<Integer,LogicalExpressionPlan> mExpressionPlans; 
++	
++    private LogicalFieldSchema cubeKeyUidOnlySchema; 
++    
++    /*
++     * This is a map storing Uids which have been generated for an input
++     * This map is required to make the uids persistant between calls of
++     * resetSchema and getSchema
++     */
++    private Map<Integer,Long> generatedInputUids = new HashMap<Integer,Long>();
++    
++    final static String CUBE_COL_NAME = "cube";
++    
++	public LOCube(LogicalPlan plan) {
++		super("LOCube", plan);
++	}
++
++	public LOCube(OperatorPlan plan, MultiMap<Integer,LogicalExpressionPlan> expressionPlans) {
++		super("LOCube", plan);
++        this.mExpressionPlans = expressionPlans;
++    }
++    
++	@Override
++	public LogicalSchema getSchema() throws FrontendException {
++		return null;
++	}
++
++	@Override
++	public void accept(PlanVisitor v) throws FrontendException {
++        if (!(v instanceof LogicalRelationalNodesVisitor)) {
++            throw new FrontendException("Expected LogicalPlanVisitor", 2223);
++        }
++        ((LogicalRelationalNodesVisitor)v).visit(this);
++	}
++
++	@Override
++	public boolean isEqual(Operator other) throws FrontendException {
++        if (other != null && other instanceof LOCube) {
++            LOCube oc = (LOCube)other;
++            for( Integer key : mExpressionPlans.keySet() ) {                    
++                if( ! oc.mExpressionPlans.containsKey(key) ) {
++                    return false;
++                }
++                Collection<LogicalExpressionPlan> exp1 = 
++                    mExpressionPlans.get(key);
++                Collection<LogicalExpressionPlan> exp2 = 
++                    oc.mExpressionPlans.get(key);
++
++                if(! ( exp1 instanceof ArrayList<?> 
++                || exp2 instanceof ArrayList<?> ) ) {
++                    throw new FrontendException( "Expected an ArrayList " +
++                    "of Expression Plans", 2235 );
++                }
++
++                ArrayList<LogicalExpressionPlan> expList1 = 
++                    (ArrayList<LogicalExpressionPlan>) exp1;
++                ArrayList<LogicalExpressionPlan> expList2 = 
++                    (ArrayList<LogicalExpressionPlan>) exp2;
++
++                for (int i = 0; i < expList1.size(); i++) {
++                    if (!expList1.get(i).isEqual(expList2.get(i))) {
++                        return false;
++                    }
++                }
++            }
++            return checkEquality((LogicalRelationalOperator) other);
++         }
++        return false;
++	}
++
++    public MultiMap<Integer,LogicalExpressionPlan> getExpressionPlans() {
++        return mExpressionPlans;
++    }
++    
++    public void setExpressionPlans(MultiMap<Integer,LogicalExpressionPlan> plans) {
++        this.mExpressionPlans = plans;
++    }
++
++    @Override
++    public void resetUid() {
++        cubeKeyUidOnlySchema = null;
++        generatedInputUids = new HashMap<Integer,Long>();
++    }
++    
++    public List<Operator> getInputs(LogicalPlan plan) {
++      return plan.getPredecessors(this);
++    }
++}
+Index: src/org/apache/pig/newplan/logical/relational/LogicalRelationalNodesVisitor.java
+===================================================================
+--- src/org/apache/pig/newplan/logical/relational/LogicalRelationalNodesVisitor.java	(revision 1303571)
++++ src/org/apache/pig/newplan/logical/relational/LogicalRelationalNodesVisitor.java	(working copy)
+@@ -63,6 +63,9 @@
+     public void visit(LOInnerLoad load) throws FrontendException {
+     }
+ 
++    public void visit(LOCube cube) throws FrontendException {
++    }
++    
+     public void visit(LOCogroup loCogroup) throws FrontendException {
+     }
+     
