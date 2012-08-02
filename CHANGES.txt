@@ -24,6 +24,18 @@ INCOMPATIBLE CHANGES
 
 IMPROVEMENTS
 
+PIG-2854 AvroStorage doesn't work with Avro 1.7.1 (cheolsoo via sms)
+
+PIG-2779: Refactoring the code for setting number of reducers (jay23jack via billgraham)
+
+PIG-2765: Implementing RollupDimensions UDF and adding ROLLUP clause in CUBE operator (prasanth_j via dvryaboy)
+
+PIG-2814: Fix issues with Sample operator documentation (prasanth_j via dvryaboy)
+
+PIG-2817: Documentation for Groovy UDFs (herberts via julien)
+
+PIG-2492: AvroStorage should recognize globs and commas (cheolsoo via sms)
+
 PIG-2706: Add clear to list of grunt commands (xalan via azaroth)
 
 PIG-2823: TestPigContext.testImportList() does not pass if another javac in on the PATH (julien)
@@ -205,6 +217,20 @@ PIG-2337: Provide UDF with input schema (xutingz via daijy)
 OPTIMIZATIONS
 
 BUG FIXES
+
+PIG-2849: Errors in document Getting Started (miyakawataku via billgraham)
+
+PIG-2843: Typo in Documentation (eric59 via billgraham)
+
+PIG-2841: Inconsistent URL in Docs (eric59 via billgraham)
+
+PIG-2740: get rid of "java[77427:1a03] Unable to load realm info from SCDynamicStore" log lines when running pig tests (julien)
+
+PIG-2839: mock.Storage overwrites output with the last relation written when storing UNION (julien)
+
+PIG-2840: Fix SchemaTuple bugs (jcoveney)
+
+PIG-2842: TestNewPlanOperatorPlan fails when new Configuration() picks up a previous minicluster conf file (julien)
 
 PIG-2827: Unwrap exception swallowing in TOP (haitao.yao via jcoveney)
 
@@ -450,6 +476,8 @@ PIG-2011: Speed up TestTypedMap.java (dvryaboy)
 PIG-2228: support partial aggregation in map task (thejas)
 
 BUG FIXES
+
+PIG-2729: Macro expansion does not use pig.import.search.path - UnitTest borked (johannesch via daijy)
 
 PIG-2783: Fix Iterator_1 e2e test for Hadoop 23 (rohini via daijy)
 
