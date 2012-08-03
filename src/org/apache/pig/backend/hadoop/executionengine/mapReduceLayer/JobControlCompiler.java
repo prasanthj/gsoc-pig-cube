@@ -657,6 +657,11 @@ public class JobControlCompiler{
                 nwJob.setOutputValueClass(NullableTuple.class);
             }
 
+	    if (mro.isFullCubeJob()) {
+		String symlink = addSingleFileToDistributedCache(pigContext, conf, mro.getAnnotatedLatticeFile(), "annotatedlattice");
+		conf.set("pig.annotatedLatticeFile", symlink);
+	    }
+            
             if(mro.isGlobalSort() || mro.isLimitAfterSort()){
                 // Only set the quantiles file and sort partitioner if we're a
                 // global sort, not for limit after sort.

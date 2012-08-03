@@ -332,4 +332,14 @@ public class Utils {
         }
     }
 
+    public static void convertNullToUnknown(Tuple in) throws IOException {
+	int idx = 0;
+	for (Object obj : in.getAll()) {
+	    if ((obj == null)) {
+		in.set(idx, "unknown");
+	    }
+	    idx++;
+	}
+    }
+
 }
