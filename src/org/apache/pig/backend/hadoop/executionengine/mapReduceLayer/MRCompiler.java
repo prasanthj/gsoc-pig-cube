@@ -102,6 +102,7 @@ import org.apache.pig.impl.builtin.PoissonSampleLoader;
 import org.apache.pig.impl.builtin.RandomSampleLoader;
 import org.apache.pig.impl.io.FileLocalizer;
 import org.apache.pig.impl.io.FileSpec;
+import org.apache.pig.impl.io.ReadSingleLoader;
 import org.apache.pig.impl.plan.CompilationMessageCollector;
 import org.apache.pig.impl.plan.CompilationMessageCollector.MessageType;
 import org.apache.pig.impl.plan.DepthFirstWalker;
@@ -1951,6 +1952,7 @@ public class MRCompiler extends PhyPlanVisitor {
 	    curMROp.setMapDone(false);
 	    compiledInputs[0] = curMROp;
 	    long inputFileSize = 0;
+	    long actualTupleSize = 0;
 	    
 	    List<PhysicalOperator> dimOperators = new ArrayList<PhysicalOperator>();
 	    List<PhysicalOperator> nonDimOperators = new ArrayList<PhysicalOperator>();
@@ -1970,6 +1972,7 @@ public class MRCompiler extends PhyPlanVisitor {
 		if (opRoot instanceof POLoad) {
 		    mro.mapPlan.add(opRoot);
 		    inputFileSize = getInputFileSize((POLoad) opRoot);
+		    actualTupleSize = getActualTupleSize((POLoad) opRoot);
 		}
 
 		// populate foreach operator from the physical plan.
@@ -2130,7 +2133,7 @@ public class MRCompiler extends PhyPlanVisitor {
 
 	    mro2.setMapDone(true);
 	    
-	    generateReducePlan(op, mro2, sampleJobOutput, sampleSize, inputFileSize, tFile);
+	    generateReducePlan(op, mro2, sampleJobOutput, sampleSize, inputFileSize, actualTupleSize);
 	    return mro2;
 	    //generateReducePlan(op, mro, sampleJobOutput);
 	    //return mro;
@@ -2162,29 +2165,32 @@ public class MRCompiler extends PhyPlanVisitor {
 	return startNew(lFile, prevJob);
     }
 
-    private long getInputFileSize(POLoad proot) throws MRCompilerException {
+    private long getInputFileSize(POLoad proot) throws IOException {
 	Configuration conf = new Configuration();
 	List<POLoad> loads = new ArrayList<POLoad>();
 	loads.add(proot);
-	long size = 0;
-	try {
-	    size = InputSizeReducerEstimator.getTotalInputFileSize(
-	            conf, loads, new org.apache.hadoop.mapreduce.Job(conf));
-        } catch (IOException e) {
-            int errCode = 2034;
-	    String msg = "Error determining the File Size of input";
-	    throw new MRCompilerException(msg, errCode, PigException.BUG, e);
-        }
-	return size;
+	return InputSizeReducerEstimator.getTotalInputFileSize(conf, loads, new org.apache.hadoop.mapreduce.Job(conf));
     }
 
+    private long getActualTupleSize(POLoad proot) throws IOException {
+	long size = 0;
+	Configuration conf = new Configuration();
+	String fileName = proot.getLFile().getFileName();
+	ReadSingleLoader rsl = new ReadSingleLoader(proot.getLoadFunc(), conf, fileName, 0);
+	size = rsl.getRawTupleSize();
+	if( size == -1) {
+	    throw new IOException("Cannot determine the raw size of the tuple.");
+	}
+	return size;
+    }
+    
     private long getBytesPerReducer() {
 	Configuration conf = new Configuration();
 	return conf.getLong(PigReducerEstimator.BYTES_PER_REDUCER_PARAM, PigReducerEstimator.DEFAULT_BYTES_PER_REDUCER);
     }
 
     private void generateReducePlan(POCube op, MapReduceOper mro, FileSpec sampleJobOutput, long sampleSize, 
-	    long overallDataSize, FileSpec tempInpFile) throws VisitorException {
+	    long overallDataSize, long actualTupleSize) throws VisitorException {
 	try {
 	    // create POPackage
 	    POPackage pkg = new POPackage(new OperatorKey(scope,nig.getNextNodeId(scope)));
@@ -2210,7 +2216,7 @@ public class MRCompiler extends PhyPlanVisitor {
 	    String[] ufArgs = new String[3];
 	    ufArgs[0] = String.valueOf(overallDataSize);
 	    ufArgs[1] = String.valueOf(getBytesPerReducer());
-	    ufArgs[2] = tempInpFile.getFileName();
+	    ufArgs[2] = String.valueOf(actualTupleSize);
 	    POUserFunc uf = new POUserFunc(new OperatorKey(scope, nig.getNextNodeId(scope)), -1, null, 
 		    new FuncSpec(MaxGroupSize.class.getName(), ufArgs));
 	    uf.setResultType(DataType.TUPLE);

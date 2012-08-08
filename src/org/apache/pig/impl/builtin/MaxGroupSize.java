@@ -23,17 +23,11 @@ import java.util.Iterator;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.hadoop.conf.Configuration;
 import org.apache.pig.EvalFunc;
 import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.data.DataBag;
-import org.apache.pig.data.DataType;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.data.TupleFactory;
-import org.apache.pig.impl.io.InterStorage;
-import org.apache.pig.impl.io.ReadSingleLoader;
-import org.apache.pig.impl.io.ReadToEndLoader;
-import org.apache.pig.impl.util.UDFContext;
 
 /**
  * TODO write doc TODO implement algebraic interface
@@ -49,10 +43,6 @@ public class MaxGroupSize extends EvalFunc<Tuple> {
     private long overallDataSize;
     private boolean isFirstTuple;
     private long bytesPerReducer;
-    private String tempInpFile;
-
-    // Using this default value from skewed join code
-    public static final float DEFAULT_PERCENT_MEMUSAGE = 0.3f;
 
     public MaxGroupSize() {
 	this(null);
@@ -63,9 +53,8 @@ public class MaxGroupSize extends EvalFunc<Tuple> {
 	this.totalSampleCount = 0;
 	this.overallDataSize = Long.valueOf(args[0]);
 	this.bytesPerReducer = Long.valueOf(args[1]);
-	this.tempInpFile = args[2];
+	this.actualTupleSize = Long.valueOf(args[2]);
 	this.inMemTupleSize = 0;
-	this.actualTupleSize = 0;
 	this.isFirstTuple = true;
     }
 
@@ -122,31 +111,12 @@ public class MaxGroupSize extends EvalFunc<Tuple> {
 	    totalSampleCount = firstGroupSize;
 	    isFirstTuple = false;
 	    
-	    actualTupleSize = getActualTupleSize();
+	 //   actualTupleSize = getActualTupleSize();
 	}
 	partitionFactor = determinePartitionFactor(maxGroupSize, in);
 	result.set(0, partitionFactor);
 	log.info("[CUBE] Output tuple - " + result);
 	return result;
-    }
-
-    private long getActualTupleSize() throws ExecException {
-	ReadSingleLoader loader;
-        try {
-            
-            // Hadoop security need this property to be set
-            Configuration conf = UDFContext.getUDFContext().getJobConf();
-            if (System.getenv("HADOOP_TOKEN_FILE_LOCATION") != null) {
-                conf.set("mapreduce.job.credentials.binary", 
-                        System.getenv("HADOOP_TOKEN_FILE_LOCATION"));
-            }
-            loader = new ReadSingleLoader(
-                    new InterStorage(), conf, tempInpFile, 0);
-            return loader.getTupleActualSize();
-        } catch (Exception e) {
-            throw new ExecException("Failed to open file '" + tempInpFile
-                    + "'; error = " + e.getMessage());
-        }
     }
 
     private int determinePartitionFactor(long maxGroupSize, Tuple in) throws ExecException {
@@ -155,21 +125,23 @@ public class MaxGroupSize extends EvalFunc<Tuple> {
 	// can handle vs overall data size and N is the total sample size.
 	// This equation is taken from mr-cube paper.
 	int partitionFactor = 0;
-	//long heapMemAvail = (long) (Runtime.getRuntime().maxMemory() * DEFAULT_PERCENT_MEMUSAGE);
 	long heapMemAvail = bytesPerReducer;
+	long estTotalRows = overallDataSize/actualTupleSize;
 	if (inMemTupleSize == 0) {
 	    inMemTupleSize = getTupleSize(in);
+	    log.info("[CUBE] Overall data size " + overallDataSize);
 	    log.info("[CUBE] Input bag size " + in.getMemorySize() + " bytes");
 	    log.info("[CUBE] In-memory tuple size " + inMemTupleSize + " bytes");
 	    log.info("[CUBE] Actual tuple size " + actualTupleSize + " bytes");
+	    log.info("[CUBE] Estimated total number of rows " + estTotalRows);
 	    log.info("[CUBE] Maximum available heap memory is " + heapMemAvail + " bytes");
 	    log.info("[CUBE] Max. tuples by reducer : " + heapMemAvail / inMemTupleSize);
-	    double r = 100 * ((double) (heapMemAvail / inMemTupleSize) / (double) overallDataSize);
+	    double r = ((double) (heapMemAvail / inMemTupleSize) / (double) estTotalRows);
 	    log.info("[CUBE] Ratio (r): " + r);
 	    log.info("[CUBE] Threshold: " + (0.75 * r * totalSampleCount));
 	}
 	long maxTuplesByReducer = heapMemAvail / inMemTupleSize;
-	double r = ((double) maxTuplesByReducer / (double) overallDataSize) * 100;
+	double r = ((double) maxTuplesByReducer / (double) estTotalRows);
 	double threshold = 0.75 * r * totalSampleCount;
 	if (maxGroupSize > threshold) {
 	    log.info("[CUBE] Group size: " + maxGroupSize + " is reducer un-friendly.");

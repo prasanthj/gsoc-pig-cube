@@ -31,13 +31,13 @@ import org.apache.hadoop.mapreduce.RecordReader;
 import org.apache.hadoop.mapreduce.TaskAttemptContext;
 import org.apache.hadoop.mapreduce.TaskAttemptID;
 import org.apache.pig.Expression;
-import org.apache.pig.LoadCaster;
 import org.apache.pig.LoadFunc;
 import org.apache.pig.LoadMetadata;
 import org.apache.pig.ResourceSchema;
 import org.apache.pig.ResourceStatistics;
 import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.PigSplit;
 import org.apache.pig.backend.hadoop.executionengine.shims.HadoopShims;
+import org.apache.pig.builtin.PigStorage;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.impl.plan.OperatorKey;
 
@@ -79,7 +79,6 @@ public class ReadSingleLoader extends LoadFunc implements LoadMetadata {
      */
     private int curSplitIndex;
     
-    private int prevSplitIndex;
     /**
      * the input splits returned by underlying {@link InputFormat#getSplits(JobContext)}
      */
@@ -176,48 +175,24 @@ public class ReadSingleLoader extends LoadFunc implements LoadMetadata {
         wrappedLoadFunc.prepareToRead(reader, pigSplit);
         return true;
     }
-
-    @Override
-    public Tuple getNext() throws IOException {
-        try {
-            Tuple t = null;
-            if(reader == null) {
-                // first call
-                return getNextHelper();
-            } else {
-                // we already have a reader initialized
-                t = wrappedLoadFunc.getNext();
-                if(t != null) {
-                    return t;
-                }
-                // if loadfunc returned null, we need to read next split
-                // if there is one
-                updateCurSplitIndex();
-                return getNextHelper();
-            }
-        } catch (InterruptedException e) {
-            throw new IOException(e);
-        }
-    }
     
-    
-    public long getTupleActualSize() throws IOException {
+    // Reads a tuple and returns the raw bytes read
+    // FIXME: currently works only for PigStorage
+    public long getRawTupleSize() throws IOException {
+	long size = -1;
 	try {
 	    if (reader == null) {
 		// first call
 		getNextHelper();
-		return curSplitIndex - prevSplitIndex;
+		size = ((PigStorage)wrappedLoadFunc).getRawTupleSize();
+		return size;
 	    } else {
-		// we already have a reader initialized
-		wrappedLoadFunc.getNext();
-
-		// if loadfunc returned null, we need to read next split
-		// if there is one
-		updateCurSplitIndex();
-		getNextHelper();
-		return curSplitIndex - prevSplitIndex;
+		return size;
 	    }
 	} catch (InterruptedException e) {
+	    throw new IOException(e);
+	} catch (ClassCastException e) {
+	    //FIXME: what to do if PigStorage type casting fails?
 	    throw new IOException(e);
 	}
 
@@ -244,72 +219,63 @@ public class ReadSingleLoader extends LoadFunc implements LoadMetadata {
      */
     private void updateCurSplitIndex() {
         if(toReadSplits == null){
-            prevSplitIndex = curSplitIndex;
             ++curSplitIndex;
         }else{
             ++toReadSplitsIdx;
             if(toReadSplitsIdx >= toReadSplits.length){
                 // finished all the splits in splitIndexes array
-        	prevSplitIndex = curSplitIndex;
                 curSplitIndex = Integer.MAX_VALUE;
             }else{
-        	prevSplitIndex = curSplitIndex;
                 curSplitIndex = toReadSplits[toReadSplitsIdx];
             }
         }
     }
 
     @Override
-    public InputFormat getInputFormat() throws IOException {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public LoadCaster getLoadCaster() throws IOException {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public void prepareToRead(RecordReader reader, PigSplit split) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public void setLocation(String location, Job job) throws IOException {
-        //no-op
-    }
-
-    @Override
     public ResourceSchema getSchema(String location, Job job) throws IOException {
-        if (wrappedLoadFunc instanceof LoadMetadata) {
-            return ((LoadMetadata) wrappedLoadFunc).getSchema(location, job);
-        } else {
-            return null;
-        }
+	// TODO Auto-generated method stub
+	return null;
     }
 
     @Override
     public ResourceStatistics getStatistics(String location, Job job) throws IOException {
-        if (wrappedLoadFunc instanceof LoadMetadata) {
-            return ((LoadMetadata) wrappedLoadFunc).getStatistics(location, job);
-        } else {
-            return null;
-        }
+	// TODO Auto-generated method stub
+	return null;
     }
 
     @Override
     public String[] getPartitionKeys(String location, Job job) throws IOException {
-        if (wrappedLoadFunc instanceof LoadMetadata) {
-            return ((LoadMetadata) wrappedLoadFunc).getPartitionKeys(location, job);
-        } else {
-            return null;
-        }
+	// TODO Auto-generated method stub
+	return null;
     }
 
     @Override
     public void setPartitionFilter(Expression partitionFilter) throws IOException {
-        if (wrappedLoadFunc instanceof LoadMetadata) {
-             ((LoadMetadata) wrappedLoadFunc).setPartitionFilter(partitionFilter);
-        }
+	// TODO Auto-generated method stub
+	
+    }
+
+    @Override
+    public void setLocation(String location, Job job) throws IOException {
+	// TODO Auto-generated method stub
+	
+    }
+
+    @Override
+    public InputFormat getInputFormat() throws IOException {
+	// TODO Auto-generated method stub
+	return null;
+    }
+
+    @Override
+    public void prepareToRead(RecordReader reader, PigSplit split) throws IOException {
+	// TODO Auto-generated method stub
+	
+    }
+
+    @Override
+    public Tuple getNext() throws IOException {
+	// TODO Auto-generated method stub
+	return null;
     }
 }
