@@ -27,7 +27,7 @@ import java.util.Set;
 import org.apache.pig.data.DataBag;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.data.TupleFactory;
-import org.apache.pig.impl.builtin.HolisticCubeCompundKey;
+import org.apache.pig.impl.builtin.HolisticCubeCompoundKey;
 import org.junit.Test;
 
 import com.google.common.collect.ImmutableSet;
@@ -56,7 +56,7 @@ public class TestHolisticCubeCompundKey {
         );
 
         String[] regions = {"region,state,city", "region,state,", "region,,", ",,"};
-        HolisticCubeCompundKey hcd = new HolisticCubeCompundKey(regions);
+        HolisticCubeCompoundKey hcd = new HolisticCubeCompoundKey(regions);
         DataBag bag = hcd.exec(t);
         assertEquals(bag.size(), expected.size());
 

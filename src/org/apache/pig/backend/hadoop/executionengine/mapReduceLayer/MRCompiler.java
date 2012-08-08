@@ -95,7 +95,7 @@ import org.apache.pig.impl.builtin.DefaultIndexableLoader;
 import org.apache.pig.impl.builtin.FindQuantiles;
 import org.apache.pig.impl.builtin.GetMemNumRows;
 import org.apache.pig.impl.builtin.HolisticCube;
-import org.apache.pig.impl.builtin.HolisticCubeCompundKey;
+import org.apache.pig.impl.builtin.HolisticCubeCompoundKey;
 import org.apache.pig.impl.builtin.MaxGroupSize;
 import org.apache.pig.impl.builtin.PartitionSkewedKeys;
 import org.apache.pig.impl.builtin.PoissonSampleLoader;
@@ -1956,6 +1956,7 @@ public class MRCompiler extends PhyPlanVisitor {
 	    List<PhysicalOperator> nonDimOperators = new ArrayList<PhysicalOperator>();
 	    List<Boolean> dimFlat = new ArrayList<Boolean>();
 	    List<MapReduceOper> roots = MRPlan.getRoots();
+	    FileSpec tFile = getTempFileSpec();
 	    // convert it to a generic case
 	    // get the inputs of cube and then perform sampling on that input
 	    
@@ -1992,7 +1993,6 @@ public class MRCompiler extends PhyPlanVisitor {
 		foreach.setResultType(DataType.BAG);
 		foreach.visit(this);
 		
-		FileSpec tFile = getTempFileSpec();
 		mro2 = getJobWithSampleLoader(mro, tFile, sampleSize, RandomSampleLoader.class.getName());
 		//mro2 = getJobWithSampleLoader(mro, tFile, sampleSize, PoissonSampleLoader.class.getName());
 		curMROp = mro2;
@@ -2050,7 +2050,7 @@ public class MRCompiler extends PhyPlanVisitor {
 	    PhysicalPlan userFuncPlan = new PhysicalPlan();
 	    String[] lattice = getLatticeAsStringArray(op.getCubeLattice());
 	    POUserFunc hUserFunc = new POUserFunc(new OperatorKey(scope, nig.getNextNodeId(scope)), -1, null, 
-		    			new FuncSpec(HolisticCubeCompundKey.class.getName(), lattice));
+		    			new FuncSpec(HolisticCubeCompoundKey.class.getName(), lattice));
 	    hUserFunc.setResultType(DataType.BAG);
 	    userFuncPlan.add(hUserFunc);
 
@@ -2130,7 +2130,7 @@ public class MRCompiler extends PhyPlanVisitor {
 
 	    mro2.setMapDone(true);
 	    
-	    generateReducePlan(op, mro2, sampleJobOutput, sampleSize, inputFileSize);
+	    generateReducePlan(op, mro2, sampleJobOutput, sampleSize, inputFileSize, tFile);
 	    return mro2;
 	    //generateReducePlan(op, mro, sampleJobOutput);
 	    //return mro;
@@ -2163,13 +2163,13 @@ public class MRCompiler extends PhyPlanVisitor {
     }
 
     private long getInputFileSize(POLoad proot) throws MRCompilerException {
-	Configuration CONF = new Configuration();
+	Configuration conf = new Configuration();
 	List<POLoad> loads = new ArrayList<POLoad>();
 	loads.add(proot);
 	long size = 0;
 	try {
 	    size = InputSizeReducerEstimator.getTotalInputFileSize(
-	            CONF, loads, new org.apache.hadoop.mapreduce.Job(CONF));
+	            conf, loads, new org.apache.hadoop.mapreduce.Job(conf));
         } catch (IOException e) {
             int errCode = 2034;
 	    String msg = "Error determining the File Size of input";
@@ -2178,7 +2178,13 @@ public class MRCompiler extends PhyPlanVisitor {
 	return size;
     }
 
-    private void generateReducePlan(POCube op, MapReduceOper mro, FileSpec sampleJobOutput, long sampleSize, long overallDataSize) throws VisitorException {
+    private long getBytesPerReducer() {
+	Configuration conf = new Configuration();
+	return conf.getLong(PigReducerEstimator.BYTES_PER_REDUCER_PARAM, PigReducerEstimator.DEFAULT_BYTES_PER_REDUCER);
+    }
+
+    private void generateReducePlan(POCube op, MapReduceOper mro, FileSpec sampleJobOutput, long sampleSize, 
+	    long overallDataSize, FileSpec tempInpFile) throws VisitorException {
 	try {
 	    // create POPackage
 	    POPackage pkg = new POPackage(new OperatorKey(scope,nig.getNextNodeId(scope)));
@@ -2201,8 +2207,10 @@ public class MRCompiler extends PhyPlanVisitor {
 	    flat.add(false);
 
 	    PhysicalPlan ufPlan = new PhysicalPlan();
-	    String[] ufArgs = new String[1];
+	    String[] ufArgs = new String[3];
 	    ufArgs[0] = String.valueOf(overallDataSize);
+	    ufArgs[1] = String.valueOf(getBytesPerReducer());
+	    ufArgs[2] = tempInpFile.getFileName();
 	    POUserFunc uf = new POUserFunc(new OperatorKey(scope, nig.getNextNodeId(scope)), -1, null, 
 		    new FuncSpec(MaxGroupSize.class.getName(), ufArgs));
 	    uf.setResultType(DataType.TUPLE);

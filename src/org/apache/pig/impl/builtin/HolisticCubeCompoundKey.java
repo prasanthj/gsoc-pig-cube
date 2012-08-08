@@ -35,18 +35,18 @@ import org.apache.pig.impl.util.Utils;
  * TODO write doc
  */
 
-public class HolisticCubeCompundKey extends EvalFunc<DataBag> {
+public class HolisticCubeCompoundKey extends EvalFunc<DataBag> {
 
     private TupleFactory tf;
     private BagFactory bf;
     private Log log = LogFactory.getLog(getClass());
     private List<Tuple> cl;
 
-    public HolisticCubeCompundKey() {
+    public HolisticCubeCompoundKey() {
 	this(null);
     }
 
-    public HolisticCubeCompundKey(String[] args) {
+    public HolisticCubeCompoundKey(String[] args) {
 	tf = TupleFactory.getInstance();
 	bf = BagFactory.getInstance();
 	cl = new ArrayList<Tuple>();

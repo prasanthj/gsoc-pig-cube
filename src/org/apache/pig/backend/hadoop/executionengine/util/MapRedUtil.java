@@ -60,6 +60,7 @@ import org.apache.pig.impl.util.Pair;
 import org.apache.pig.impl.util.UDFContext;
 import org.apache.pig.impl.util.Utils;
 
+
 /**
  * A class of utility static methods to be used in the hadoop map reduce backend
  */
@@ -149,6 +150,66 @@ public class MapRedUtil {
             reducerMap.put(keyT, new Pair(minIndex, cnt));// 1 is added to account for the 0 index
         }
         return reducerMap;
+    }
+
+    public static List<String> loadAnnotatedLatticeFromHDFS(String latticeFile, Configuration conf) throws IOException {
+	List<String> result = new ArrayList<String>();
+
+        ReadToEndLoader loader = new ReadToEndLoader(Utils.getTmpFileStorageObject(conf), conf, 
+                latticeFile, 0);
+        Tuple t;
+        while( (t = loader.getNext()) != null) {
+            String finTup = "%s,%s";
+            String region = t.get(0).toString();
+            String partition = t.get(1).toString();
+            result.add(String.format(finTup, region.substring(1,region.length()-1), partition));
+        }
+        
+        if( result.size() == 0 ) {
+            // this means that the lattice file is empty
+            log.warn("Empty lattice file: " + latticeFile);
+            return null;
+        }
+	return result;
+    }
+    
+    public static List<String> loadAnnotatedLatticeFromLocalCache(String latticeFile, Configuration conf) throws IOException {
+	List<String> result = new ArrayList<String>();
+        // use local file system to get the keyDistFile
+        Configuration newconf = new Configuration(false);            
+        
+        if (conf.get("yarn.resourcemanager.principal")!=null) {
+            newconf.set("yarn.resourcemanager.principal", conf.get("yarn.resourcemanager.principal"));
+        }
+        
+        if (conf.get("fs.file.impl")!=null)
+            newconf.set("fs.file.impl", conf.get("fs.file.impl"));
+        if (conf.get("fs.hdfs.impl")!=null)
+            newconf.set("fs.hdfs.impl", conf.get("fs.hdfs.impl"));
+        if (conf.getBoolean("pig.tmpfilecompression", false))
+        {
+            newconf.setBoolean("pig.tmpfilecompression", true);
+            if (conf.get("pig.tmpfilecompression.codec")!=null)
+                newconf.set("pig.tmpfilecompression.codec", conf.get("pig.tmpfilecompression.codec"));
+        }
+        newconf.set(MapRedUtil.FILE_SYSTEM_NAME, "file:///");
+
+        ReadToEndLoader loader = new ReadToEndLoader(Utils.getTmpFileStorageObject(newconf), newconf, 
+                latticeFile, 0);
+        Tuple t;
+        while( (t = loader.getNext()) != null) {
+            String finTup = "%s,%s";
+            String region = t.get(0).toString();
+            String partition = t.get(1).toString();
+            result.add(String.format(finTup, region.substring(1,region.length()-1), partition));
+        }
+        
+        if( result.size() == 0 ) {
+            // this means that the lattice file is empty
+            log.warn("Empty lattice file: " + latticeFile);
+            return null;
+        }
+	return result;
     }
     
     public static void setupUDFContext(Configuration job) throws IOException {
