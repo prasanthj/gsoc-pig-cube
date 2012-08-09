@@ -120,6 +120,7 @@ import org.apache.pig.impl.util.UriUtil;
 import org.apache.pig.impl.util.Utils;
 import org.apache.pig.newplan.logical.relational.LOJoin;
 
+
 /**
  * The compiler that compiles a given physical plan
  * into a DAG of MapReduce operators which can then 
@@ -1824,23 +1825,29 @@ public class MRCompiler extends PhyPlanVisitor {
 		// 2M is good enough for upto 20B tuples. refer mr-cube paper
 		long sampleSize = 1000;
 
-		curMROp = getCubeSampleJob(op, prevJob, sampleSize , sampleJobOutput, rp);
-		//curMROp.setMapDoneSingle(true);
-		//MRPlan.add(curMROp);
-		MRPlan.connect(curMROp, prevJob);
+//		double ss = determineSamplePercentage(op);
+//		if(ss == 0.0) {
+//		    // TODO no sampling is required
+//		} else {
+		     curMROp = getCubeSampleJob(op, prevJob, sampleSize, sampleJobOutput, rp);
 		
-		//reverting back to original plan sequence
-		curMROp = prevJob;
-		
-		//setting up the result of sample job which is the annotated lattice
-		//to the curMROp. This file will be distributed using distributed cache
-		//to all mappers running the actual cube materialization job
-		curMROp.setAnnotatedLatticeFile(sampleJobOutput.getFileName());
-		curMROp.setFullCubeJob(true);
-		
-		modifyCubeUDFsForHolisticMeasure(op);
-		
-		compiledInputs[0] = curMROp;
+		     //curMROp.setMapDoneSingle(true);
+		     //MRPlan.add(curMROp);
+		     MRPlan.connect(curMROp, prevJob);
+
+		     //reverting back to original plan sequence
+		     curMROp = prevJob;
+
+		     //setting up the result of sample job which is the annotated lattice
+		     //to the curMROp. This file will be distributed using distributed cache
+		     //to all mappers running the actual cube materialization job
+		     curMROp.setAnnotatedLatticeFile(sampleJobOutput.getFileName());
+		     curMROp.setFullCubeJob(true);
+
+		     modifyCubeUDFsForHolisticMeasure(op, sampleJobOutput.getFileName());
+
+		     compiledInputs[0] = curMROp;
+		//}
 	    } catch (PlanException e) {
 		int errCode = 2034;
 		String msg = "Error compiling operator " + op.getClass().getSimpleName();
@@ -1853,8 +1860,42 @@ public class MRCompiler extends PhyPlanVisitor {
 	}
     }
 
+    private double determineSamplePercentage(POCube op) throws IOException {
+	PhysicalOperator opRoot;
+	List<MapReduceOper> roots = MRPlan.getRoots();
+	long inputFileSize = 0;
+	long actualTupleSize = 0;
+	long estTotalRows = 0;
+	double sampleSize = 0;
+	if (roots.size() > 1) {
+	    // TODO what to do if there are two loads?
+	    // should take the output of join or cogroup?
+	} else {
+	    PhysicalPlan mapPlan = roots.get(0).mapPlan;
+	    opRoot = mapPlan.getRoots().get(0);
+	    // FIXME is this check necessary?
+	    if (opRoot instanceof POLoad) {
+		inputFileSize = getInputFileSize((POLoad) opRoot);
+		actualTupleSize = getActualTupleSize((POLoad) opRoot);
+		estTotalRows = inputFileSize/actualTupleSize;
+		
+		if( estTotalRows > 2000000000 ) {
+		    // for #rows beyond 2B, 2M samples are sufficient 
+		    sampleSize = 2000000/estTotalRows;
+		} else if ( estTotalRows > 2000000 && estTotalRows < 2000000000) {
+		    // for #rows between 2M to 2B, 100K tuples are sufficient
+		    sampleSize = 100000/estTotalRows;
+		} else {
+		    sampleSize = 0.0;
+		}
+	    }
+	}
+	
+	return sampleSize;
+    }
+
     //FIXME Try if this works if the query contains two separate cube operators
-    private void modifyCubeUDFsForHolisticMeasure(POCube op) throws PlanException {
+    private void modifyCubeUDFsForHolisticMeasure(POCube op, String annotatedLatticeFile) throws PlanException {
 	PhysicalPlan mapPlan = curMROp.mapPlan;
 	Map<OperatorKey, PhysicalOperator> poMap = mapPlan.getKeys();
 	
@@ -1864,11 +1905,13 @@ public class MRCompiler extends PhyPlanVisitor {
 	    PhysicalOperator pop = entry.getValue();
 	    if (pop instanceof POForEach) {
 		boolean isForeachInsertedByCube = false;
-		String[] lattice = getLatticeAsStringArray(op.getCubeLattice());
-
+		
+		String[] ufArgs = new String[op.getCubeLattice().size() + 1];
+		getLatticeAsStringArray(ufArgs, op.getCubeLattice());
+		ufArgs[op.getCubeLattice().size()] = annotatedLatticeFile;
 		PhysicalPlan hplan = new PhysicalPlan();
 		POUserFunc hUserFunc = new POUserFunc(new OperatorKey(scope, nig.getNextNodeId(scope)), -1, null, 
-					new FuncSpec(HolisticCube.class.getName(), lattice));
+					new FuncSpec(HolisticCube.class.getName(), ufArgs));
 		hUserFunc.setResultType(DataType.BAG);
 		hplan.add(hUserFunc);
 
@@ -2051,13 +2094,14 @@ public class MRCompiler extends PhyPlanVisitor {
 
 	    List<PhysicalPlan> foreachInpPlans = new ArrayList<PhysicalPlan>();
 	    PhysicalPlan userFuncPlan = new PhysicalPlan();
-	    String[] lattice = getLatticeAsStringArray(op.getCubeLattice());
+	    String[] lattice = new String[op.getCubeLattice().size()]; 
+	    getLatticeAsStringArray(lattice, op.getCubeLattice());
 	    POUserFunc hUserFunc = new POUserFunc(new OperatorKey(scope, nig.getNextNodeId(scope)), -1, null, 
 		    			new FuncSpec(HolisticCubeCompoundKey.class.getName(), lattice));
 	    hUserFunc.setResultType(DataType.BAG);
 	    userFuncPlan.add(hUserFunc);
 
-	    // add dimensional columns
+	    //add dimensional columns
 	    for(PhysicalOperator dimOp : dimOperators) {
 		if( dimOp instanceof POCast ) {
 		    for(PhysicalOperator innerOp : dimOp.getInputs()) {
@@ -2290,14 +2334,12 @@ public class MRCompiler extends PhyPlanVisitor {
         }
     }
 
-    private String[] getLatticeAsStringArray(List<Tuple> cubeLattice) {
-	String[] result = new String[cubeLattice.size()];
+    private void getLatticeAsStringArray(String[] ufArgs, List<Tuple> cubeLattice) {
 	for(int i = 0; i < cubeLattice.size(); i++) {
-	    result[i] = cubeLattice.get(i).toString();
+	    ufArgs[i] = cubeLattice.get(i).toString();
 	    //strip off the parantheses when tuple is converted to string 
-	    result[i] = result[i].substring(1, result[i].length()-1);
+	    ufArgs[i] = ufArgs[i].substring(1, ufArgs[i].length()-1);
 	}
-	return result;
     }
     
     @Override

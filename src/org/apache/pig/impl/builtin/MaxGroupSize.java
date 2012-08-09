@@ -125,7 +125,9 @@ public class MaxGroupSize extends EvalFunc<Tuple> {
 	// can handle vs overall data size and N is the total sample size.
 	// This equation is taken from mr-cube paper.
 	int partitionFactor = 0;
-	long heapMemAvail = bytesPerReducer;
+	//long heapMemAvail = bytesPerReducer;
+	//FO TESTING 
+	long heapMemAvail = 1000;
 	long estTotalRows = overallDataSize/actualTupleSize;
 	if (inMemTupleSize == 0) {
 	    inMemTupleSize = getTupleSize(in);
