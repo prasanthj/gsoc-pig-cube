@@ -17,7 +17,6 @@
  */
 package org.apache.pig.impl.util;
 
-import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
@@ -51,7 +50,6 @@ import org.apache.pig.impl.io.ReadToEndLoader;
 import org.apache.pig.impl.io.TFileStorage;
 import org.apache.pig.impl.logicalLayer.schema.Schema;
 import org.apache.pig.impl.logicalLayer.schema.Schema.FieldSchema;
-import org.apache.pig.newplan.logical.Util;
 import org.apache.pig.newplan.logical.relational.LogicalSchema;
 import org.apache.pig.parser.ParserException;
 import org.apache.pig.parser.QueryParserDriver;
@@ -332,6 +330,10 @@ public class Utils {
         }
     }
 
+    /**
+     * Convert the null values in tuple to "unknown" since null will be used for rollups. 
+     * Used by Cube related UDFs
+     */
     public static void convertNullToUnknown(Tuple in) throws IOException {
 	int idx = 0;
 	for (Object obj : in.getAll()) {

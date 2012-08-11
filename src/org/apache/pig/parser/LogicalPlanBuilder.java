@@ -560,10 +560,10 @@ public class LogicalPlanBuilder {
 	    LogicalExpressionPlan uexpPlan = new LogicalExpressionPlan();
 	    if (operations.get(operIdx).equals(LOCube.CUBE_OP)) {
 		// lattice.add(computeLattice(LOCube.CUBE_OP, lexpList));
-		new UserFuncExpression(uexpPlan, new FuncSpec(CubeDimensions.class.getName(), "NULL"), lexpList);
+		new UserFuncExpression(uexpPlan, new FuncSpec(CubeDimensions.class.getName()), lexpList);
 	    } else {
 		// lattice.add(computeLattice(LOCube.ROLLUP_OP, lexpList));
-		new UserFuncExpression(uexpPlan, new FuncSpec(RollupDimensions.class.getName(), "NULL"), lexpList);
+		new UserFuncExpression(uexpPlan, new FuncSpec(RollupDimensions.class.getName()), lexpList);
 	    }
 
 	    for (LogicalExpressionPlan lexp : lexpPlanList) {

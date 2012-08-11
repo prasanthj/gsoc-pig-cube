@@ -35,7 +35,6 @@ import org.apache.pig.data.DataBag;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.data.TupleFactory;
 import org.apache.pig.impl.io.ReadToEndLoader;
-import org.apache.pig.impl.util.Pair;
 import org.apache.pig.impl.util.UDFContext;
 import org.apache.pig.impl.util.Utils;
 
@@ -51,7 +50,7 @@ public class HolisticCube extends EvalFunc<DataBag> {
     private List<Tuple> cl;
     private boolean isLatticeRead;
     private String annotatedLatticeLocation;
-    private HashMap<Tuple, Pair<Integer, Integer>> aLattice;
+    private HashMap<Tuple, Integer> aLattice;
 
     public HolisticCube() {
 	this(null);
@@ -63,8 +62,7 @@ public class HolisticCube extends EvalFunc<DataBag> {
 	this.cl = new ArrayList<Tuple>();
 	stringArrToTupleList(this.cl, args);
 	this.isLatticeRead = false;
-	this.annotatedLatticeLocation = args[args.length - 1];
-	this.aLattice = new HashMap<Tuple, Pair<Integer, Integer>>();
+	this.aLattice = new HashMap<Tuple, Integer>();
 	log.info("[CUBE] lattice - " + cl);
     }
 
@@ -132,10 +130,9 @@ public class HolisticCube extends EvalFunc<DataBag> {
 
 		Tuple t;
 		while ((t = loader.getNext()) != null) {
-		    log.info("[CUBE] Tuple: " + t.toString());
+		    log.info("[CUBE] Annotated Region: " + t.toString());
 		    int paritionFactor = Integer.valueOf(t.get(1).toString());
-		    Pair<Integer, Integer> ppf = new Pair<Integer, Integer>(paritionFactor, paritionFactor);
-		    aLattice.put((Tuple) t.get(0), ppf);
+		    aLattice.put((Tuple) t.get(0), paritionFactor);
 		}
 		// after reading annotated lattice we do not need the normal
 		// lattice anymore
@@ -157,7 +154,9 @@ public class HolisticCube extends EvalFunc<DataBag> {
 	if (cl != null && cl.size() != 0) {
 	    for (Tuple region : cl) {
 		Tuple newt = tf.newTuple(in.getAll());
-		if (region.size() != in.size()) {
+		// input tuple will have one additional field because
+		// the algebraic attribute will also be projected (last field)
+		if (region.size()+1 != in.size()) {
 		    throw new RuntimeException("Number of fields in tuple should be equal to the number of fields in region tuple.");
 		}
 		for (int i = 0; i < region.size(); i++) {
@@ -169,11 +168,14 @@ public class HolisticCube extends EvalFunc<DataBag> {
 	    }
 	} else {
 	    // This means the lattice has been annotated
-	    for (Map.Entry<Tuple, Pair<Integer, Integer>> entry : aLattice.entrySet()) {
+	    for (Map.Entry<Tuple, Integer> entry : aLattice.entrySet()) {
 		Tuple region = entry.getKey();
-		Pair<Integer, Integer> ppf = entry.getValue();
+		int pf = entry.getValue();
+		
 		Tuple newt = tf.newTuple(in.getAll());
-		if (region.size() != in.size()) {
+		// input tuple will have one additional field because
+		// the algebraic attribute will also be projected (last field)
+		if (region.size()+1 != in.size()) {
 		    throw new RuntimeException("Number of fields in tuple should be equal to the number of fields in region tuple.");
 		}
 		for (int i = 0; i < region.size(); i++) {
@@ -181,15 +183,14 @@ public class HolisticCube extends EvalFunc<DataBag> {
 			newt.set(i, null);
 		    }
 		}
-
-		if (ppf.first > 1) {
-		    if (ppf.second == 0) {
-			ppf.second = ppf.first;
-		    }
-		    newt.append(ppf.second);
-		    ppf.second = ppf.second - 1;
-
+		// last tuple is the algebraic attribute
+		// TODO check if it works correctly for all data types
+		// alg attr should go to the same reducers 
+		Object algAttr = newt.get(newt.size()-1);
+		if( pf > 1) {
+		    newt.set(newt.size()-1, algAttr.hashCode()%pf);
 		}
+		
 		result.add(newt);
 	    }
 	}

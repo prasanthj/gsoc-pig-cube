@@ -31,6 +31,7 @@ public class POCube extends PhysicalOperator {
 
     private boolean isHolistic;
     private String algebraicAttr;
+    private int algebraicAttrCol;
     private List<Tuple> cubeLattice;
 
     public POCube(OperatorKey k, int rp) {
@@ -102,5 +103,13 @@ public class POCube extends PhysicalOperator {
 
     public void setCubeLattice(List<Tuple> cubeLattice) {
 	this.cubeLattice = cubeLattice;
+    }
+
+    public int getAlgebraicAttrCol() {
+	return algebraicAttrCol;
+    }
+
+    public void setAlgebraicAttrCol(int algebraicAttrCol) {
+	this.algebraicAttrCol = algebraicAttrCol;
     }
 }

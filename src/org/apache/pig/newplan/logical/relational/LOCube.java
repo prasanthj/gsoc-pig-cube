@@ -85,6 +85,7 @@ public class LOCube extends LogicalRelationalOperator {
     private MultiMap<Integer, String> dimensions;
     private LogicalPlan innerPlan;
     private String algebraicAttr;
+    private int algebraicAttrCol;
     
     /*
      * This is a map storing Uids which have been generated for an input
@@ -211,5 +212,13 @@ public class LOCube extends LogicalRelationalOperator {
 
     public void setOperations(List<String> operations) {
 	this.operations = operations;
+    }
+
+    public int getAlgebraicAttrCol() {
+	return algebraicAttrCol;
+    }
+
+    public void setAlgebraicAttrCol(int algebraicAttrCol) {
+	this.algebraicAttrCol = algebraicAttrCol;
     }
 }

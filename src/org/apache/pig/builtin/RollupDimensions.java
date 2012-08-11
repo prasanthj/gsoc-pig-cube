@@ -30,6 +30,7 @@ import org.apache.pig.data.TupleFactory;
 import org.apache.pig.impl.logicalLayer.FrontendException;
 import org.apache.pig.impl.logicalLayer.schema.Schema;
 import org.apache.pig.impl.logicalLayer.schema.Schema.FieldSchema;
+import org.apache.pig.impl.util.Utils;
 
 import com.google.common.collect.Lists;
 
@@ -60,7 +61,7 @@ public class RollupDimensions extends EvalFunc<DataBag> {
     @Override
     public DataBag exec(Tuple tuple) throws IOException {
 	List<Tuple> result = Lists.newArrayListWithCapacity(tuple.size() + 1);
-	CubeDimensions.convertNullToUnknown(tuple);
+	Utils.convertNullToUnknown(tuple);
 	result.add(tuple);
 	iterativelyRollup(result, tuple);
 	return bf.newDefaultBag(result);

@@ -118,6 +118,7 @@ import org.apache.pig.impl.util.ObjectSerializer;
 import org.apache.pig.impl.util.Pair;
 import org.apache.pig.impl.util.UriUtil;
 import org.apache.pig.impl.util.Utils;
+import org.apache.pig.newplan.logical.expression.ProjectExpression;
 import org.apache.pig.newplan.logical.relational.LOJoin;
 
 
@@ -1825,28 +1826,32 @@ public class MRCompiler extends PhyPlanVisitor {
 		// 2M is good enough for upto 20B tuples. refer mr-cube paper
 		long sampleSize = 1000;
 
-//		double ss = determineSamplePercentage(op);
-//		if(ss == 0.0) {
-//		    // TODO no sampling is required
-//		} else {
-		     curMROp = getCubeSampleJob(op, prevJob, sampleSize, sampleJobOutput, rp);
-		
-		     //curMROp.setMapDoneSingle(true);
-		     //MRPlan.add(curMROp);
-		     MRPlan.connect(curMROp, prevJob);
+		//		double ss = determineSamplePercentage(op);
+		//		if(ss == 0.0) {
+		//		    // TODO no sampling is required
+		//		} else {
+		if( op.getAlgebraicAttr() == null ) {
+		    LOG.warn("[CUBE] Algebraic attribute cannot be identified. Falling back to naive cubing.");
+		} else {
+		    curMROp = getCubeSampleJob(op, prevJob, sampleSize, sampleJobOutput, rp);
 
-		     //reverting back to original plan sequence
-		     curMROp = prevJob;
+		    //curMROp.setMapDoneSingle(true);
+		    //MRPlan.add(curMROp);
+		    MRPlan.connect(curMROp, prevJob);
 
-		     //setting up the result of sample job which is the annotated lattice
-		     //to the curMROp. This file will be distributed using distributed cache
-		     //to all mappers running the actual cube materialization job
-		     curMROp.setAnnotatedLatticeFile(sampleJobOutput.getFileName());
-		     curMROp.setFullCubeJob(true);
+		    //reverting back to original plan sequence
+		    curMROp = prevJob;
 
-		     modifyCubeUDFsForHolisticMeasure(op, sampleJobOutput.getFileName());
+		    //setting up the result of sample job which is the annotated lattice
+		    //to the curMROp. This file will be distributed using distributed cache
+		    //to all mappers running the actual cube materialization job
+		    curMROp.setAnnotatedLatticeFile(sampleJobOutput.getFileName());
+		    curMROp.setFullCubeJob(true);
 
-		     compiledInputs[0] = curMROp;
+		    modifyCubeUDFsForHolisticMeasure(op, sampleJobOutput.getFileName());
+
+		    compiledInputs[0] = curMROp;
+		}
 		//}
 	    } catch (PlanException e) {
 		int errCode = 2034;
@@ -1906,9 +1911,8 @@ public class MRCompiler extends PhyPlanVisitor {
 	    if (pop instanceof POForEach) {
 		boolean isForeachInsertedByCube = false;
 		
-		String[] ufArgs = new String[op.getCubeLattice().size() + 1];
+		String[] ufArgs = new String[op.getCubeLattice().size()];
 		getLatticeAsStringArray(ufArgs, op.getCubeLattice());
-		ufArgs[op.getCubeLattice().size()] = annotatedLatticeFile;
 		PhysicalPlan hplan = new PhysicalPlan();
 		POUserFunc hUserFunc = new POUserFunc(new OperatorKey(scope, nig.getNextNodeId(scope)), -1, null, 
 					new FuncSpec(HolisticCube.class.getName(), ufArgs));
@@ -1958,16 +1962,40 @@ public class MRCompiler extends PhyPlanVisitor {
 			    }
 			} else {
 			    PhysicalPlan pplan = new PhysicalPlan();
-			    pplan.add(leaf);
+			    
 			    // if its a cast operator then connect the inner projections
 			    if (leaf instanceof POCast) {
 				for (PhysicalOperator projOp : ((POCast) leaf).getInputs()) {
-				    pplan.add(projOp);
-				    pplan.connect(projOp, leaf);
+				    // these non-dimensional columns are projected only after UDFs
+				    // so we can be sure that the algebraic attribute will be the
+				    // last one to be appended to dimensions list
+				    if(op.getAlgebraicAttr().equals(((POCast)leaf).getFieldSchema().getName()) == true) {
+					hplan.add(leaf);
+					for (PhysicalOperator hprojOp : ((POCast) leaf).getInputs()) {
+					    hplan.add(hprojOp);
+					    hplan.connect(hprojOp, leaf);
+					}
+					hplan.connect(leaf, hUserFunc);
+				    } else {
+					pplan.add(leaf);
+					pplan.add(projOp);
+					pplan.connect(projOp, leaf);
+					feIPlans.add(pplan);
+					feFlat.add(false);
+				    }
 				}
+
+			    } else {
+				// else it will be POProject
+				// POProject doesn't store the alias of the projected column.
+				// the alias of the columns are attached to POCast and not to POProject.
+				// alias of the column is a MUST for holistic cubing because the
+				// algebraic attribute will be identified by the column alias and
+				// projected to HolisticCube UDF
+				// FIXME: Don't know how to handle this case!!
+				throw new PlanException("Cannot determine algebraic attribute's alias from POProject. " +
+						"May be a cast is missing in the schema corresponding to algebraic attribute '" + op.getAlgebraicAttr() + "'.");
 			    }
-			    feIPlans.add(pplan);
-			    feFlat.add(false);
 			}
 		    }
 		}
@@ -2059,6 +2087,7 @@ public class MRCompiler extends PhyPlanVisitor {
 				// The non-dimensional columns will be pushed down.
 				// these columns might be used later by measures
 				nonDimOperators.add(pOp);
+
 			    }
 			}
 		    }

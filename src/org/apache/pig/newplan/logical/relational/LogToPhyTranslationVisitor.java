@@ -1391,7 +1391,7 @@ public class LogToPhyTranslationVisitor extends LogicalRelationalNodesVisitor {
 	}
 	// TODO fix description
 	// determine if the measure is holistic
-	// TOP-K + COUNT is holistic
+	// TOP-K + COUNT/COUNT_STAR is holistic
 	while (succ != null) {
 	    if (succ instanceof LOForEach) {
 		LogicalPlan innerplan = ((LOForEach) succ).getInnerPlan();
@@ -1409,7 +1409,8 @@ public class LogToPhyTranslationVisitor extends LogicalRelationalNodesVisitor {
 			    List<Operator> sources = oplans.get(i).getSources();
 			    for (Operator source : sources) {
 				if (source instanceof UserFuncExpression) {
-				    if (((UserFuncExpression) source).getFuncSpec().getClassName().equals("org.apache.pig.builtin.COUNT") == true) {
+				    if (((UserFuncExpression) source).getFuncSpec().getClassName().equals("org.apache.pig.builtin.COUNT") == true ||
+					    ((UserFuncExpression) source).getFuncSpec().getClassName().equals("org.apache.pig.builtin.COUNT_STAR") == true) {
 					Operator ufsink = source.getPlan().getSinks().get(0);
 					try {
 					    countalias = ((ProjectExpression) ufsink).getFieldSchema().alias;
@@ -1541,7 +1542,8 @@ public class LogToPhyTranslationVisitor extends LogicalRelationalNodesVisitor {
 			    List<Operator> sources = oplans.get(i).getSources();
 			    for (Operator source : sources) {
 				if (source instanceof UserFuncExpression) {
-				    if (((UserFuncExpression) source).getFuncSpec().getClassName().equals("org.apache.pig.builtin.COUNT") == true) {
+				    if (((UserFuncExpression) source).getFuncSpec().getClassName().equals("org.apache.pig.builtin.COUNT") == true ||
+					    ((UserFuncExpression) source).getFuncSpec().getClassName().equals("org.apache.pig.builtin.COUNT_STAR") == true) {
 					countOutAlias = ((LOForEach) succ).alias;
 				    } else if (((UserFuncExpression) source).getFuncSpec().getClassName().equals("org.apache.pig.builtin.TOP") == true) {
 					List<Operator> exps = source.getPlan().getSinks();
