@@ -35,7 +35,7 @@ public class POCube extends PhysicalOperator {
     private List<Tuple> cubeLattice;
 
     public POCube(OperatorKey k, int rp) {
-	this(k, -1, null, false, null);
+	this(k, rp, null, false, null);
     }
 
     public POCube(OperatorKey k, int rp, List<PhysicalOperator> inp, boolean isHolistic, String algebraicAttr) {
