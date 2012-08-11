@@ -59,11 +59,8 @@ public class HolisticCubeCompoundKey extends EvalFunc<DataBag> {
 	// region labels are csv strings. if trailing values of region label
 	// are null/empty then split function ignores those values. specify some
 	// integer value greater than the number of output tokens makes sure
-	// that
-	// all null values in region label are assigned an empty string. first
-	// value
-	// which is the most detailed level in the lattice doesn't have null
-	// values
+	// that all null values in region label are assigned an empty string. first
+	// value which is the most detailed level in the lattice doesn't have null values
 	int maxIdx = args[0].length() + 1;
 
 	for (String arg : args) {
@@ -83,8 +80,8 @@ public class HolisticCubeCompoundKey extends EvalFunc<DataBag> {
     /**
      * @param in
      *            - input tuple
-     * @return - tuple have 3 fields (compound keys) 1 - primary key - region
-     *         label 2 - secondary key - group 3 - value - 1
+     * @return - tuple have 3 fields (compound keys) 1 - primary key - region label 2 - secondary key - group 3 - value
+     *         - 1
      */
     public DataBag exec(Tuple in) throws IOException {
 	log.info("[CUBE] Input - " + in);
@@ -116,7 +113,8 @@ public class HolisticCubeCompoundKey extends EvalFunc<DataBag> {
 	for (Tuple region : cl) {
 	    Tuple newt = tf.newTuple(in.getAll());
 	    if (region.size() != in.size()) {
-		throw new RuntimeException("Number of fields in tuple should be equal to the number of fields in region tuple.");
+		throw new RuntimeException(
+		        "Number of fields in tuple should be equal to the number of fields in region tuple.");
 	    }
 	    for (int i = 0; i < region.size(); i++) {
 		if (region.get(i) == null) {

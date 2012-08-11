@@ -110,8 +110,8 @@ public class MaxGroupSize extends EvalFunc<Tuple> {
 	    // whose size is equal to the total sample count
 	    totalSampleCount = firstGroupSize;
 	    isFirstTuple = false;
-	    
-	 //   actualTupleSize = getActualTupleSize();
+
+	    // actualTupleSize = getActualTupleSize();
 	}
 	partitionFactor = determinePartitionFactor(maxGroupSize, in);
 	result.set(0, partitionFactor);
@@ -125,10 +125,10 @@ public class MaxGroupSize extends EvalFunc<Tuple> {
 	// can handle vs overall data size and N is the total sample size.
 	// This equation is taken from mr-cube paper.
 	int partitionFactor = 0;
-	//long heapMemAvail = bytesPerReducer;
-	//FO TESTING 
-	long heapMemAvail = 1000;
-	long estTotalRows = overallDataSize/actualTupleSize;
+	long heapMemAvail = bytesPerReducer;
+	// FOR TESTING
+	// long heapMemAvail = 1000;
+	long estTotalRows = overallDataSize / actualTupleSize;
 	if (inMemTupleSize == 0) {
 	    inMemTupleSize = getTupleSize(in);
 	    log.info("[CUBE] Overall data size " + overallDataSize);
