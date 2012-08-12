@@ -24,7 +24,21 @@ INCOMPATIBLE CHANGES
 
 IMPROVEMENTS
 
-PIG-2854 AvroStorage doesn't work with Avro 1.7.1 (cheolsoo via sms)
+PIG-2851: Add flag to ant to run tests with a debugger port (billgraham)
+
+PIG-2862: Hardcode certain tuple lengths into the TUPLE BinInterSedes byte identifier (jcoveney)
+
+PIG-2855: Provide a method to measure time spent in UDFs (dvryaboy)
+
+PIG-2837: AvroStorage throws StackOverFlowError (cheolsoo via sms)
+
+PIG-2856: AvroStorage doesn't load files in the directories when a glob pattern matches both files and directories. (cheolsoo via sms)
+
+PIG-2569: Fix org.apache.pig.test.TestInvoker.testSpeed (aklochkov via dvryaboy)
+
+PIG-2858: Improve PlanHelper to allow finding any PhysicalOperator in a plan (dvryaboy)
+
+PIG-2854: AvroStorage doesn't work with Avro 1.7.1 (cheolsoo via sms)
 
 PIG-2779: Refactoring the code for setting number of reducers (jay23jack via billgraham)
 
@@ -217,6 +231,10 @@ PIG-2337: Provide UDF with input schema (xutingz via daijy)
 OPTIMIZATIONS
 
 BUG FIXES
+
+PIG-2860: [piggybank] TestAvroStorageUtils.testGetConcretePathFromGlob fails on some version of hadoop (cheolsoo via jcoveney)
+
+PIG-2861: PlanHelper imports org.python.google.common.collect.Lists instead of org.google.common.collect.Lists (jcoveney)
 
 PIG-2849: Errors in document Getting Started (miyakawataku via billgraham)
 
@@ -476,6 +494,8 @@ PIG-2011: Speed up TestTypedMap.java (dvryaboy)
 PIG-2228: support partial aggregation in map task (thejas)
 
 BUG FIXES
+
+PIG-2859: Fix few e2e test failures (rohini via daijy)
 
 PIG-2729: Macro expansion does not use pig.import.search.path - UnitTest borked (johannesch via daijy)
 
