@@ -131,6 +131,9 @@ LoadPushDown, LoadMetadata, StoreMetadata {
     private ArrayList<Object> mProtoTuple = null;
     private TupleFactory mTupleFactory = TupleFactory.getInstance();
     private String loadLocation;
+    
+    // To store the raw bytes of a tuple
+    private long rawTupleSize;
 
     boolean isSchemaOn = false;
     boolean dontLoadSchema = false;
@@ -225,6 +228,7 @@ LoadPushDown, LoadMetadata, StoreMetadata {
             Text value = (Text) in.getCurrentValue();
             byte[] buf = value.getBytes();
             int len = value.getLength();
+            setRawTupleSize(len);
             int start = 0;
             int fieldID = 0;
             for (int i = 0; i < len; i++) {
@@ -511,5 +515,13 @@ LoadPushDown, LoadMetadata, StoreMetadata {
     public void storeStatistics(ResourceStatistics stats, String location,
             Job job) throws IOException {
 
+    }
+
+    public long getRawTupleSize() {
+	return rawTupleSize;
+    }
+
+    public void setRawTupleSize(long rawTupleSize) {
+	this.rawTupleSize = rawTupleSize;
     }
 }

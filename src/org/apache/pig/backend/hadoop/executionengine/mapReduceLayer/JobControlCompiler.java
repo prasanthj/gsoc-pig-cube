@@ -70,6 +70,7 @@ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOpe
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POStore;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.util.PlanHelper;
 import org.apache.pig.backend.hadoop.executionengine.shims.HadoopShims;
+import org.apache.pig.backend.hadoop.executionengine.util.MapRedUtil;
 import org.apache.pig.data.BagFactory;
 import org.apache.pig.data.DataType;
 import org.apache.pig.data.SchemaTupleFrontend;
@@ -693,6 +694,33 @@ public class JobControlCompiler{
                 }
             }
 
+            if (mro.isFullCubeJob()) {
+        	String symlink = addSingleFileToDistributedCache(pigContext, conf, mro.getAnnotatedLatticeFile(), "annotatedlattice");
+        	conf.set("pig.annotatedLatticeFile", symlink);
+        	// FIXME do we need to set the estimated reducer here?
+//        	int urp = mro.getRequestedParallelism();
+//        	int erp = estimateParallelismForCubeJob(conf, mro);
+//        	if( urp < erp ) {
+//        	    // set the runtime #reducer of the next job as the #partition
+//        	    ParallelConstantVisitor visitor =
+//        		    new ParallelConstantVisitor(mro.reducePlan, erp);
+//        	    visitor.visit();
+//
+//        	    log.info("[CUBE] Requested parallelism ("+urp+") is less than the estimated parallelism ("+erp+"). Setting runtime parallelism to estimated value: " + erp);
+//
+//        	    // set various parallelism into the job conf for later analysis
+//        	    conf.setInt("pig.info.reducers.default.parallel", pigContext.defaultParallel);
+//        	    conf.setInt("pig.info.reducers.requested.parallel", mro.requestedParallelism);
+//        	    conf.setInt("pig.info.reducers.estimated.parallel", mro.estimatedParallelism);
+//
+//        	    // this is for backward compatibility, and we encourage to use runtimeParallelism at runtime
+//        	    mro.requestedParallelism = erp;
+//
+//        	    // finally set the number of reducers
+//        	    conf.setInt("mapred.reduce.tasks", erp);
+//        	}
+            }
+            
             if (mro.isSkewedJoin()) {
                 String symlink = addSingleFileToDistributedCache(pigContext,
                         conf, mro.getSkewedJoinPartitionFile(), "pigdistkey");
@@ -755,6 +783,26 @@ public class JobControlCompiler{
             String msg = "Internal error creating job configuration.";
             throw new JobCreationException(msg, errCode, PigException.BUG, e);
         }
+    }
+    
+    private int estimateParallelismForCubeJob(Configuration conf, MapReduceOper mro) {
+	String latticeFile = mro.getAnnotatedLatticeFile();
+	int totalEstReducers = 0;
+	if (latticeFile.isEmpty()) {
+            throw new RuntimeException(
+            "Internal error: missing annotate lattice file property.");
+        }
+
+        try {
+            List<String> lattice = MapRedUtil.loadAnnotatedLatticeFromHDFS(latticeFile, conf);
+            String[] tokens = lattice.get(0).split(",");
+            // The first tuple will have the max partition value as last field
+            totalEstReducers = Integer.valueOf(tokens[tokens.length - 1]);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+
+	return totalEstReducers;
     }
 
     /**

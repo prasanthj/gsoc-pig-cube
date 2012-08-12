@@ -18,8 +18,10 @@
 
 package org.apache.pig.pen;
 
+import java.io.IOException;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
@@ -28,8 +30,6 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.Comparator;
-import java.io.IOException;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -39,30 +39,31 @@ import org.apache.pig.data.BagFactory;
 import org.apache.pig.data.DataBag;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.impl.PigContext;
+import org.apache.pig.impl.io.FileSpec;
+import org.apache.pig.impl.logicalLayer.FrontendException;
+import org.apache.pig.impl.util.IdentityHashSet;
+import org.apache.pig.impl.util.Pair;
+import org.apache.pig.newplan.Operator;
 import org.apache.pig.newplan.logical.relational.LOCogroup;
-import org.apache.pig.newplan.logical.relational.LOJoin;
 import org.apache.pig.newplan.logical.relational.LOCross;
+import org.apache.pig.newplan.logical.relational.LOCube;
 import org.apache.pig.newplan.logical.relational.LODistinct;
 import org.apache.pig.newplan.logical.relational.LOFilter;
 import org.apache.pig.newplan.logical.relational.LOForEach;
+import org.apache.pig.newplan.logical.relational.LOJoin;
 import org.apache.pig.newplan.logical.relational.LOLimit;
 import org.apache.pig.newplan.logical.relational.LOLoad;
 import org.apache.pig.newplan.logical.relational.LOSort;
 import org.apache.pig.newplan.logical.relational.LOSplit;
-import org.apache.pig.newplan.logical.relational.LOUnion;
 import org.apache.pig.newplan.logical.relational.LOStore;
-import org.apache.pig.newplan.logical.relational.LogicalRelationalOperator;
+import org.apache.pig.newplan.logical.relational.LOUnion;
 import org.apache.pig.newplan.logical.relational.LogicalPlan;
 import org.apache.pig.newplan.logical.relational.LogicalRelationalNodesVisitor;
-import org.apache.pig.newplan.Operator;
-import org.apache.pig.impl.logicalLayer.FrontendException;
-import org.apache.pig.impl.util.IdentityHashSet;
-import org.apache.pig.impl.util.Pair;
-import org.apache.pig.impl.io.FileSpec;
+import org.apache.pig.newplan.logical.relational.LogicalRelationalOperator;
+import org.apache.pig.pen.util.ExampleTuple;
 import org.apache.pig.pen.util.LineageTracer;
 import org.apache.pig.pen.util.MetricEvaluation;
 import org.apache.pig.pen.util.PreOrderDepthFirstWalker;
-import org.apache.pig.pen.util.ExampleTuple;
 
 public class LineageTrimmingVisitor extends LogicalRelationalNodesVisitor {
 
@@ -157,6 +158,12 @@ public class LineageTrimmingVisitor extends LogicalRelationalNodesVisitor {
         if(continueTrimming)
             processOperator(cs);
 
+    }
+    
+    @Override
+    public void visit(LOCube cube) throws FrontendException {
+	if (continueTrimming)
+	    processOperator(cube);
     }
 
     @Override

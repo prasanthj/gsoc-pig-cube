@@ -98,6 +98,12 @@ public class MapReduceOper extends Operator<MROpPlanVisitor> {
     //The quantiles file name if globalSort is true
     String quantFile;
     
+    // The annotated lattice used for cubing on holistic measures
+    String annotatedLatticeFile;
+        
+    // If true the cube job is actual cube job else a sampling cube job
+    boolean isFullCubeJob = false;
+    
     //The sort order of the columns;
     //asc is true and desc is false
     boolean[] sortOrder;
@@ -485,5 +491,21 @@ public class MapReduceOper extends Operator<MROpPlanVisitor> {
     
     public boolean combineSmallSplits() {
         return combineSmallSplits;
+    }
+    
+    public String getAnnotatedLatticeFile() {
+	return annotatedLatticeFile;
+    }
+
+    public void setAnnotatedLatticeFile(String annotatedLatticeFile) {
+	this.annotatedLatticeFile = annotatedLatticeFile;
+    }
+
+    public boolean isFullCubeJob() {
+	return isFullCubeJob;
+    }
+
+    public void setFullCubeJob(boolean isFullCubeJob) {
+	this.isFullCubeJob = isFullCubeJob;
     }
 }

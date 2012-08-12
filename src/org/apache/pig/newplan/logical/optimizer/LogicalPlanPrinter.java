@@ -31,6 +31,7 @@ import org.apache.pig.newplan.OperatorPlan;
 import org.apache.pig.newplan.PlanVisitor;
 import org.apache.pig.newplan.logical.expression.LogicalExpressionPlan;
 import org.apache.pig.newplan.logical.relational.LOCogroup;
+import org.apache.pig.newplan.logical.relational.LOCube;
 import org.apache.pig.newplan.logical.relational.LOFilter;
 import org.apache.pig.newplan.logical.relational.LOForEach;
 import org.apache.pig.newplan.logical.relational.LOGenerate;
@@ -172,6 +173,9 @@ public class LogicalPlanPrinter extends PlanVisitor {
         else if(node instanceof LOForEach){
             sb.append(planString(((LOForEach)node).getInnerPlan()));        
         }
+        else if (node instanceof LOCube) {
+	    sb.append(planString(((LOCube) node).getInnerPlan()));
+	}
         else if(node instanceof LOCogroup){
             MultiMap<Integer, LogicalExpressionPlan> plans = ((LOCogroup)node).getExpressionPlans();
             for (int i : plans.keySet()) {

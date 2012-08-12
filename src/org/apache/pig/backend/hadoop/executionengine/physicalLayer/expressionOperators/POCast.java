@@ -1523,6 +1523,10 @@ public class POCast extends ExpressionOperator {
         fieldSchema = s;
     }
     
+    public ResourceFieldSchema getFieldSchema() {
+        return fieldSchema;
+    }
+    
     public FuncSpec getFuncSpec() {
         return funcSpec;
     }

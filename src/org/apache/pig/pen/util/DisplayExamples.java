@@ -18,26 +18,27 @@
 package org.apache.pig.pen.util;
 
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.HashSet;
 
 import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.data.DataBag;
 import org.apache.pig.data.DataType;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.impl.logicalLayer.FrontendException;
-import org.apache.pig.newplan.logical.relational.LOForEach;
-import org.apache.pig.newplan.logical.relational.LogicalRelationalOperator;
-import org.apache.pig.newplan.logical.relational.LOStore;
-import org.apache.pig.newplan.logical.relational.LOLoad;
-import org.apache.pig.newplan.logical.relational.LOLimit;
-import org.apache.pig.newplan.logical.relational.LogicalPlan;
-import org.apache.pig.newplan.logical.relational.LogicalSchema;
-import org.apache.pig.newplan.Operator;
 import org.apache.pig.impl.util.IdentityHashSet;
+import org.apache.pig.newplan.Operator;
+import org.apache.pig.newplan.logical.relational.LOCube;
+import org.apache.pig.newplan.logical.relational.LOForEach;
+import org.apache.pig.newplan.logical.relational.LOLimit;
+import org.apache.pig.newplan.logical.relational.LOLoad;
+import org.apache.pig.newplan.logical.relational.LOStore;
+import org.apache.pig.newplan.logical.relational.LogicalPlan;
+import org.apache.pig.newplan.logical.relational.LogicalRelationalOperator;
+import org.apache.pig.newplan.logical.relational.LogicalSchema;
 
 //Class containing some generic printing methods to print example data in a simple/tabular form
 public class DisplayExamples {
@@ -111,7 +112,11 @@ public class DisplayExamples {
             {
                 op = op.getPlan().getSuccessors(op).get(0);
                 bag = exampleData.get(op);
-            }
+	    } else if (op instanceof LOCube) {
+		// just get the data from its successor and print it for time
+		// being
+		bag = exampleData.get(op.getPlan().getPredecessors(op).get(0));
+	    }
             try {
                 DisplayTable(MakeArray(op, bag), op, bag, output);
             } catch (FrontendException e) {
