@@ -44,6 +44,10 @@ public class MaxGroupSize extends EvalFunc<Tuple> {
     private boolean isFirstTuple;
     private long bytesPerReducer;
 
+    // for debugging
+    boolean printOutputOnce = false;
+    boolean printInputOnce = false;
+
     public MaxGroupSize() {
 	this(null);
     }
@@ -64,7 +68,10 @@ public class MaxGroupSize extends EvalFunc<Tuple> {
      * @return - tuple have 2 fields 1 - max group size 2 - partition factor
      */
     public Tuple exec(Tuple in) throws IOException {
-	log.info("[CUBE] Input - " + in);
+	if (printInputOnce == false) {
+	    log.info("[CUBE] Input - " + in);
+	    printInputOnce = true;
+	}
 
 	if (in == null || in.size() == 0) {
 	    return null;
@@ -110,12 +117,14 @@ public class MaxGroupSize extends EvalFunc<Tuple> {
 	    // whose size is equal to the total sample count
 	    totalSampleCount = firstGroupSize;
 	    isFirstTuple = false;
-
-	    // actualTupleSize = getActualTupleSize();
 	}
 	partitionFactor = determinePartitionFactor(maxGroupSize, in);
 	result.set(0, partitionFactor);
-	log.info("[CUBE] Output tuple - " + result);
+
+	if (printOutputOnce == false) {
+	    log.info("[CUBE] Output tuple - " + result);
+	    printOutputOnce = true;
+	}
 	return result;
     }
 
@@ -126,18 +135,17 @@ public class MaxGroupSize extends EvalFunc<Tuple> {
 	// This equation is taken from mr-cube paper.
 	int partitionFactor = 0;
 	long heapMemAvail = bytesPerReducer;
-	// FOR TESTING
-	// long heapMemAvail = 1000;
 	long estTotalRows = overallDataSize / actualTupleSize;
 	if (inMemTupleSize == 0) {
 	    inMemTupleSize = getTupleSize(in);
-	    log.info("[CUBE] Overall data size " + overallDataSize);
-	    log.info("[CUBE] Input bag size " + in.getMemorySize() + " bytes");
-	    log.info("[CUBE] In-memory tuple size " + inMemTupleSize + " bytes");
-	    log.info("[CUBE] Actual tuple size " + actualTupleSize + " bytes");
-	    log.info("[CUBE] Estimated total number of rows " + estTotalRows);
-	    log.info("[CUBE] Maximum available heap memory is " + heapMemAvail + " bytes");
-	    log.info("[CUBE] Max. tuples by reducer : " + heapMemAvail / inMemTupleSize);
+	    log.info("[CUBE] Overall data size in bytes: " + overallDataSize);
+	    log.info("[CUBE] Input bag memory size in bytes: " + in.getMemorySize());
+	    log.info("[CUBE] In-memory tuple size in bytes: " + inMemTupleSize);
+	    log.info("[CUBE] Actual tuple size in bytes: " + actualTupleSize);
+	    log.info("[CUBE] Maximum available heap memory in bytes: " + heapMemAvail);
+	    log.info("[CUBE] Estimated total number of rows in input dataset:" + estTotalRows);
+	    log.info("[CUBE] Total number of rows in sample:" + totalSampleCount);
+	    log.info("[CUBE] Max. tuples handled by reducer: " + heapMemAvail / inMemTupleSize);
 	    double r = ((double) (heapMemAvail / inMemTupleSize) / (double) estTotalRows);
 	    log.info("[CUBE] Ratio (r): " + r);
 	    log.info("[CUBE] Threshold: " + (0.75 * r * totalSampleCount));

@@ -42,6 +42,10 @@ public class HolisticCubeCompoundKey extends EvalFunc<DataBag> {
     private Log log = LogFactory.getLog(getClass());
     private List<Tuple> cl;
 
+    // for debugging
+    boolean printOutputOnce = false;
+    boolean printInputOnce = false;
+    
     public HolisticCubeCompoundKey() {
 	this(null);
     }
@@ -84,7 +88,11 @@ public class HolisticCubeCompoundKey extends EvalFunc<DataBag> {
      *         - 1
      */
     public DataBag exec(Tuple in) throws IOException {
-	log.info("[CUBE] Input - " + in);
+	if( printInputOnce == false) {
+	    log.info("[CUBE] Input - " + in);
+	    printInputOnce = true;
+	}
+	
 	if (in == null || in.size() == 0) {
 	    return null;
 	}
@@ -100,7 +108,11 @@ public class HolisticCubeCompoundKey extends EvalFunc<DataBag> {
 	    results.add(t);
 	}
 
-	log.info("[CUBE] Output - " + bf.newDefaultBag(results));
+	if( printOutputOnce == false) {
+	    log.info("[CUBE] Output - " + bf.newDefaultBag(results));
+	    printOutputOnce = true;
+	}
+	
 	return bf.newDefaultBag(results);
     }
 

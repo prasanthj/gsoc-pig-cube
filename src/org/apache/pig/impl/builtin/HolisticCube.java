@@ -52,6 +52,10 @@ public class HolisticCube extends EvalFunc<DataBag> {
     private String annotatedLatticeLocation;
     private HashMap<Tuple, Integer> aLattice;
 
+    // for debugging
+    boolean printOutputOnce = false;
+    boolean printInputOnce = false;
+    
     public HolisticCube() {
 	this(null);
     }
@@ -93,7 +97,11 @@ public class HolisticCube extends EvalFunc<DataBag> {
     }
 
     public DataBag exec(Tuple in) throws IOException {
-	log.info("[CUBE] Input - " + in);
+	if( printInputOnce == false) {
+	    log.info("[CUBE] Input - " + in);
+	    printInputOnce = true;
+	}
+	
 	if (in == null || in.size() == 0) {
 	    return null;
 	}
@@ -145,7 +153,11 @@ public class HolisticCube extends EvalFunc<DataBag> {
 	Utils.convertNullToUnknown(in);
 	List<Tuple> groups = getAllCubeCombinations(in);
 
-	log.info("[CUBE] Output - " + bf.newDefaultBag(groups));
+	if( printOutputOnce == false) {
+	    log.info("[CUBE] Output - " + bf.newDefaultBag(groups));
+	    printOutputOnce = true;
+	}
+	
 	return bf.newDefaultBag(groups);
     }
 
