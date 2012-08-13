@@ -24,8 +24,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.pig.EvalFunc;
 import org.apache.pig.backend.executionengine.ExecException;
@@ -46,7 +44,6 @@ public class HolisticCube extends EvalFunc<DataBag> {
 
     private TupleFactory tf;
     private BagFactory bf;
-    private Log log = LogFactory.getLog(getClass());
     private List<Tuple> cl;
     private boolean isLatticeRead;
     private String annotatedLatticeLocation;
@@ -74,12 +71,9 @@ public class HolisticCube extends EvalFunc<DataBag> {
 
 	// region labels are csv strings. if trailing values of region label
 	// are null/empty then split function ignores those values. specify some
-	// integer value greater than the number of output tokens makes sure
-	// that
+	// integer value greater than the number of output tokens makes sure that
 	// all null values in region label are assigned an empty string. first
-	// value
-	// which is the most detailed level in the lattice doesn't have null
-	// values
+	// value which is the most detailed level in the lattice doesn't have null values
 	int maxIdx = args[0].length();
 
 	for (String arg : args) {
@@ -97,11 +91,11 @@ public class HolisticCube extends EvalFunc<DataBag> {
     }
 
     public DataBag exec(Tuple in) throws IOException {
-	if( printInputOnce == false) {
-	    log.info("[CUBE] Input - " + in);
-	    printInputOnce = true;
-	}
-	
+//	if( printInputOnce == false) {
+//	    log.info("[CUBE] Input - " + in);
+//	    printInputOnce = true;
+//	}
+	log.info("[CUBE] Input - " + in);
 	if (in == null || in.size() == 0) {
 	    return null;
 	}
@@ -153,11 +147,11 @@ public class HolisticCube extends EvalFunc<DataBag> {
 	Utils.convertNullToUnknown(in);
 	List<Tuple> groups = getAllCubeCombinations(in);
 
-	if( printOutputOnce == false) {
-	    log.info("[CUBE] Output - " + bf.newDefaultBag(groups));
-	    printOutputOnce = true;
-	}
-	
+//	if( printOutputOnce == false) {
+//	    log.info("[CUBE] Output - " + bf.newDefaultBag(groups));
+//	    printOutputOnce = true;
+//	}
+	log.info("[CUBE] Output - " + bf.newDefaultBag(groups));
 	return bf.newDefaultBag(groups);
     }
 

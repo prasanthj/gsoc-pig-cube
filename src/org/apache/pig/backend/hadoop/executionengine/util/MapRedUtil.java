@@ -173,8 +173,10 @@ public class MapRedUtil {
 	return result;
     }
     
-    public static List<String> loadAnnotatedLatticeFromLocalCache(String latticeFile, Configuration conf) throws IOException {
-	List<String> result = new ArrayList<String>();
+    public static HashMap<Tuple, Integer> loadAnnotatedLatticeFromLocalCache(String latticeFile, Configuration conf, Integer[] maxReducerCnt) throws IOException {
+	HashMap<Tuple, Integer> result = new HashMap<Tuple, Integer>();
+	boolean firstTuple = true;
+	
         // use local file system to get the keyDistFile
         Configuration newconf = new Configuration(false);            
         
@@ -198,10 +200,11 @@ public class MapRedUtil {
                 latticeFile, 0);
         Tuple t;
         while( (t = loader.getNext()) != null) {
-            String finTup = "%s,%s";
-            String region = t.get(0).toString();
-            String partition = t.get(1).toString();
-            result.add(String.format(finTup, region.substring(1,region.length()-1), partition));
+            if( firstTuple == true ) {
+        	maxReducerCnt[0] = (Integer)t.get(1);
+        	firstTuple = false;
+            }
+            result.put((Tuple) t.get(0), (Integer)t.get(1));
         }
         
         if( result.size() == 0 ) {

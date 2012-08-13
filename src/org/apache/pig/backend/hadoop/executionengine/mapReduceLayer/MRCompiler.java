@@ -120,7 +120,6 @@ import org.apache.pig.impl.util.ObjectSerializer;
 import org.apache.pig.impl.util.Pair;
 import org.apache.pig.impl.util.UriUtil;
 import org.apache.pig.impl.util.Utils;
-import org.apache.pig.newplan.logical.expression.ProjectExpression;
 import org.apache.pig.newplan.logical.relational.LOJoin;
 
 
@@ -1809,7 +1808,7 @@ public class MRCompiler extends PhyPlanVisitor {
     public void visitCube(POCube op) throws VisitorException {
 	// if the measure is not holistic we do not need mr-cube approach
 	// we can fallback to naive approach
-	if (op.isHolistic() == true) {
+	if (op.isHolistic() == true && !pigContext.inIllustrator) {
 	    try {
 		if (op.getCubeLattice() == null) {
 		    int errCode = 2167;
@@ -1888,7 +1887,7 @@ public class MRCompiler extends PhyPlanVisitor {
 		    // for #rows between 2M to 2B, 100K tuples are sufficient
 		    sampleSize = (double)100000 / (double)estTotalRows;
 		} else {
-		    sampleSize = 0.0;
+		    sampleSize = 0.5;
 		}
 	    }
 	}
@@ -1897,7 +1896,7 @@ public class MRCompiler extends PhyPlanVisitor {
     }
 
     // FIXME Try if this works if the query contains two separate cube operators
-    private void modifyCubeUDFsForHolisticMeasure(POCube op, String annotatedLatticeFile) throws PlanException {
+    private void modifyCubeUDFsForHolisticMeasure(POCube op, String annotatedLatticeFile) throws IOException {
 	PhysicalPlan mapPlan = curMROp.mapPlan;
 	Map<OperatorKey, PhysicalOperator> poMap = mapPlan.getKeys();
 
@@ -1967,12 +1966,31 @@ public class MRCompiler extends PhyPlanVisitor {
 				    // so we can be sure that the algebraic attribute will be the
 				    // last one to be appended to dimensions list
 				    if (op.getAlgebraicAttr().equals(((POCast) leaf).getFieldSchema().getName()) == true) {
-					hplan.add(leaf);
-					for (PhysicalOperator hprojOp : ((POCast) leaf).getInputs()) {
-					    hplan.add(hprojOp);
-					    hplan.connect(hprojOp, leaf);
+					try {
+					    POCast cloneCast = (POCast) leaf.clone();
+					    hplan.add(cloneCast);
+					    pplan.add(leaf);
+					    for (PhysicalOperator hprojOp : ((POCast) leaf).getInputs()) {
+						POProject cloneProj = (POProject) hprojOp.clone();
+						cloneProj.setInputs(hprojOp.getInputs());
+						
+						List<PhysicalOperator> castInps = new ArrayList<PhysicalOperator>();
+						castInps.add(cloneProj);
+						cloneCast.setInputs(castInps);
+						
+						hplan.add(cloneProj);
+						hplan.connect(cloneProj, cloneCast);
+					
+						pplan.add(projOp);
+						pplan.connect(projOp, leaf);
+					    }
+					    hplan.connect(cloneCast, hUserFunc);
+					    feIPlans.add(pplan);
+					    feFlat.add(false);
+					} catch (CloneNotSupportedException e) {
+					    throw new PlanException(e);
 					}
-					hplan.connect(leaf, hUserFunc);
+
 				    } else {
 					pplan.add(leaf);
 					pplan.add(projOp);
@@ -2004,6 +2022,7 @@ public class MRCompiler extends PhyPlanVisitor {
 		    foreach.addOriginalLocation(pop.getAlias(), pop.getOriginalLocations());
 		    foreach.setInputs(pop.getInputs());
 		    mapPlan.replace(pop, foreach);
+		  
 		    // at this place we have modified the plan to fit the HolisticCubeDimensions UDF
 		    // FIXME if this is allowed to continue then ConcurrentModificationException occurs
 		    break;
@@ -2055,7 +2074,6 @@ public class MRCompiler extends PhyPlanVisitor {
 		// UDF will be replaced by HolisticCubeCompoundKey UDF
 		List<PhysicalPlan> feIPlans = new ArrayList<PhysicalPlan>();
 		List<Boolean> feFlat = new ArrayList<Boolean>();
-		List<PhysicalOperator> feInps = new ArrayList<PhysicalOperator>();
 
 		PhysicalPlan projStarPlan = new PhysicalPlan();
 		POProject projStar = new POProject(new OperatorKey(scope, nig.getNextNodeId(scope)));
@@ -2063,7 +2081,6 @@ public class MRCompiler extends PhyPlanVisitor {
 		projStarPlan.add(projStar);
 		feIPlans.add(projStarPlan);
 		feFlat.add(false);
-		feInps.add(projStar);
 		foreach = new POForEach(new OperatorKey(scope, nig.getNextNodeId(scope)), -1, feIPlans, feFlat);
 		foreach.setResultType(DataType.BAG);
 		foreach.visit(this);
@@ -2224,6 +2241,12 @@ public class MRCompiler extends PhyPlanVisitor {
 	return InputSizeReducerEstimator.getTotalInputFileSize(conf, loads, new org.apache.hadoop.mapreduce.Job(conf));
     }
 
+    // FIXME ReadSingleLoader loads only the first tuple in the dataset
+    // to find the raw tuple size. This will not be accurate because the
+    // tuples may have variable size (tuples using bytearray/chararray have 
+    // size and in some rows tuples will not have certain fields). Hence need 
+    // to figure out a better way for finding the average raw tuple size. 
+    // Because of this estimation of number of rows will be have high error rate
     private long getActualTupleSize(POLoad proot) throws IOException {
 	long size = 0;
 	Configuration conf = new Configuration();

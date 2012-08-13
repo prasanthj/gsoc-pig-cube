@@ -114,35 +114,35 @@ public class POPartitionRearrange extends POLocalRearrange {
     }
 
     /* Loads the annotate cube lattice file with partitioning information */
-    private void loadLatticeFile() throws RuntimeException {
-        String latticeFile = PigMapReduce.sJobConfInternal.get().get("pig.annotatedLatticeFile", "");
-        if (latticeFile.isEmpty()) {
-            throw new RuntimeException(
-            "Internal error: missing annotate lattice file property.");
-        }
-
-        boolean tmpFileCompression = Utils.tmpFileCompression(pigContext);
-        if (tmpFileCompression) {
-            PigMapReduce.sJobConfInternal.get().setBoolean("pig.tmpfilecompression", true);
-            try {
-                PigMapReduce.sJobConfInternal.get().set("pig.tmpfilecompression.codec", Utils.tmpFileCompressionCodec(pigContext));
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
-        }
-        try {
-
-            Integer [] redCnt = new Integer[1];
-
-            //reducerMap = MapRedUtil.loadAnnotatedLatticeFromLocalCache(latticeFile, PigMapReduce.sJobConfInternal.get());
-            List<String> lattice = MapRedUtil.loadAnnotatedLatticeFromLocalCache(latticeFile, PigMapReduce.sJobConfInternal.get());
-            // check if the partition file is empty
-            totalReducers = (redCnt[0] == null) ? -1 : redCnt[0];
-            loaded = true;
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
+//    private void loadLatticeFile() throws RuntimeException {
+//        String latticeFile = PigMapReduce.sJobConfInternal.get().get("pig.annotatedLatticeFile", "");
+//        if (latticeFile.isEmpty()) {
+//            throw new RuntimeException(
+//            "Internal error: missing annotate lattice file property.");
+//        }
+//
+//        boolean tmpFileCompression = Utils.tmpFileCompression(pigContext);
+//        if (tmpFileCompression) {
+//            PigMapReduce.sJobConfInternal.get().setBoolean("pig.tmpfilecompression", true);
+//            try {
+//                PigMapReduce.sJobConfInternal.get().set("pig.tmpfilecompression.codec", Utils.tmpFileCompressionCodec(pigContext));
+//            } catch (Exception e) {
+//                throw new RuntimeException(e);
+//            }
+//        }
+//        try {
+//
+//            Integer [] redCnt = new Integer[1];
+//
+//            //reducerMap = MapRedUtil.loadAnnotatedLatticeFromLocalCache(latticeFile, PigMapReduce.sJobConfInternal.get());
+//            List<String> lattice = MapRedUtil.loadAnnotatedLatticeFromLocalCache(latticeFile, PigMapReduce.sJobConfInternal.get());
+//            // check if the partition file is empty
+//            totalReducers = (redCnt[0] == null) ? -1 : redCnt[0];
+//            loaded = true;
+//        } catch (Exception e) {
+//            throw new RuntimeException(e);
+//        }
+//    }
 
     @Override
     public String name() {
@@ -173,13 +173,13 @@ public class POPartitionRearrange extends POLocalRearrange {
         }
 
         // Load the annotate lattice file
-        if (!latticeLoaded) {
-        	try {
-        		loadLatticeFile();
-        	} catch (Exception e) {
-        		throw new RuntimeException(e);
-        	}
-        }
+//        if (!latticeLoaded) {
+//        	try {
+//        		loadLatticeFile();
+//        	} catch (Exception e) {
+//        		throw new RuntimeException(e);
+//        	}
+//        }
 
         while (true) {
             inp = processInput();
