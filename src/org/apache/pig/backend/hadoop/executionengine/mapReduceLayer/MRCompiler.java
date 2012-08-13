@@ -101,6 +101,7 @@ import org.apache.pig.impl.builtin.HolisticCubeCompoundKey;
 import org.apache.pig.impl.builtin.MaxGroupSize;
 import org.apache.pig.impl.builtin.PartitionSkewedKeys;
 import org.apache.pig.impl.builtin.PoissonSampleLoader;
+import org.apache.pig.impl.builtin.PostProcess;
 import org.apache.pig.impl.builtin.RandomSampleLoader;
 import org.apache.pig.impl.io.FileLocalizer;
 import org.apache.pig.impl.io.FileSpec;
@@ -1841,21 +1842,50 @@ public class MRCompiler extends PhyPlanVisitor {
 			// to all mappers running the actual cube materialization job
 			curMROp.setAnnotatedLatticeFile(sampleJobOutput.getFileName());
 			curMROp.setFullCubeJob(true);
+			curMROp.requestedParallelism =  op.getRequestedParallelism();
 
-			modifyCubeUDFsForHolisticMeasure(op, sampleJobOutput.getFileName());
-
+			byte algAttrType = modifyCubeUDFsForHolisticMeasure(op, sampleJobOutput.getFileName());
+			compiledInputs[0] = curMROp;
+			
+			addAlgAttrColToLR(op, algAttrType);
+			
+			curMROp.setMapDone(true);
+			curMROp.setReduceDone(false);
+			FileSpec vpOutput = getTempFileSpec();
+			endSingleInputPlanWithStr(vpOutput);
+			
+			MapReduceOper ppMro = startNew(vpOutput, curMROp);
+			curMROp = ppMro;
+			curMROp.setFullCubeJob(false);
+			
+			insertPostProcessJob(ppMro, op, vpOutput);
 			compiledInputs[0] = curMROp;
 		    }
 		}
 	    } catch (PlanException e) {
-		int errCode = 2034;
+		int errCode = 2167;
 		String msg = "Error compiling operator " + op.getClass().getSimpleName();
 		throw new MRCompilerException(msg, errCode, PigException.BUG, e);
 	    } catch (IOException e) {
-		int errCode = 2034;
+		int errCode = 2167;
 		String msg = "Error compiling operator " + op.getClass().getSimpleName();
 		throw new MRCompilerException(msg, errCode, PigException.BUG, e);
 	    }
+	}
+    }
+
+    private void addAlgAttrColToLR(POCube op, byte algAttrType) throws PlanException {
+	PhysicalPlan mapPlan = curMROp.mapPlan;
+	PhysicalOperator succ = (PhysicalOperator) mapPlan.getLeaves().get(0);
+	if( succ instanceof POLocalRearrange) {
+	    List<PhysicalPlan> inps = ((POLocalRearrange) succ).getPlans();
+	    PhysicalPlan pplan = new PhysicalPlan();
+	    POProject proj = new POProject(new OperatorKey(scope, nig.getNextNodeId(scope)));
+	    proj.setColumn(inps.size());
+	    proj.setResultType(algAttrType);
+	    pplan.add(proj);
+	    inps.add(pplan);
+	    ((POLocalRearrange) succ).setPlans(inps);
 	}
     }
 
@@ -1896,7 +1926,8 @@ public class MRCompiler extends PhyPlanVisitor {
     }
 
     // FIXME Try if this works if the query contains two separate cube operators
-    private void modifyCubeUDFsForHolisticMeasure(POCube op, String annotatedLatticeFile) throws IOException {
+    private byte modifyCubeUDFsForHolisticMeasure(POCube op, String annotatedLatticeFile) throws IOException {
+	byte algAttrType = DataType.BYTEARRAY;
 	PhysicalPlan mapPlan = curMROp.mapPlan;
 	Map<OperatorKey, PhysicalOperator> poMap = mapPlan.getKeys();
 
@@ -1910,7 +1941,7 @@ public class MRCompiler extends PhyPlanVisitor {
 		String[] ufArgs = new String[op.getCubeLattice().size()];
 		getLatticeAsStringArray(ufArgs, op.getCubeLattice());
 		PhysicalPlan hplan = new PhysicalPlan();
-		POUserFunc hUserFunc = new POUserFunc(new OperatorKey(scope, nig.getNextNodeId(scope)), -1, null,
+		POUserFunc hUserFunc = new POUserFunc(new OperatorKey(scope, nig.getNextNodeId(scope)), op.getRequestedParallelism(), null,
 		        new FuncSpec(HolisticCube.class.getName(), ufArgs));
 		hUserFunc.setResultType(DataType.BAG);
 		hplan.add(hUserFunc);
@@ -1970,6 +2001,7 @@ public class MRCompiler extends PhyPlanVisitor {
 					    POCast cloneCast = (POCast) leaf.clone();
 					    hplan.add(cloneCast);
 					    pplan.add(leaf);
+					    algAttrType = ((POCast)leaf).getResultType();
 					    for (PhysicalOperator hprojOp : ((POCast) leaf).getInputs()) {
 						POProject cloneProj = (POProject) hprojOp.clone();
 						cloneProj.setInputs(hprojOp.getInputs());
@@ -2029,7 +2061,36 @@ public class MRCompiler extends PhyPlanVisitor {
 		}
 	    }
 	}
+	
+	return algAttrType;
     }
+
+
+    private void insertPostProcessJob(MapReduceOper ppMro, POCube op, FileSpec vpOutput) throws VisitorException, PlanException {
+	PhysicalPlan mapPlan = curMROp.mapPlan;
+	
+	List<PhysicalPlan> feIPlans = new ArrayList<PhysicalPlan>();
+	List<Boolean> feFlat = new ArrayList<Boolean>();
+	POForEach foreach = null;
+
+	PhysicalPlan hPlan = new PhysicalPlan();
+	POProject projStar = new POProject(new OperatorKey(scope, nig.getNextNodeId(scope)));
+	projStar.setStar(true);
+	hPlan.add(projStar);
+	
+	POUserFunc userFunc = new POUserFunc(new OperatorKey(scope, nig.getNextNodeId(scope)), op.getRequestedParallelism(), null, 
+					new FuncSpec(PostProcess.class.getName()));
+	userFunc.setResultType(DataType.TUPLE);
+	hPlan.add(userFunc);
+	hPlan.connect(projStar, userFunc);
+	feIPlans.add(hPlan);
+	feFlat.add(true);
+	
+	foreach = new POForEach(new OperatorKey(scope, nig.getNextNodeId(scope)), -1, feIPlans, feFlat);
+	foreach.setResultType(DataType.BAG);
+	mapPlan.addAsLeaf(foreach);
+    }
+
 
     private MapReduceOper getCubeSampleJob(POCube op, MapReduceOper prevJob, double sampleSize, FileSpec sampleJobOutput)
 	    throws VisitorException {
