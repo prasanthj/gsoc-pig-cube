@@ -30,42 +30,66 @@ import org.apache.pig.data.Tuple;
 import org.apache.pig.data.TupleFactory;
 
 /**
- * TODO write doc TODO implement algebraic interface
+ * This UDF is used by Cube operator for holistic cubing.
+ * It strips off the reducer number value that is inserted
+ * into each tuples. The map job of full holistic cube job
+ * appends algebraicAttribute%partitionFactor to the end of
+ * key and to the end of dimensional list inside values. This
+ * value is inserted by the map job to make sure algebraic attributes
+ * with same values goes to the same reducer.
+ * 
+ * For example: 
+ * Input tuple: ((midwest,OH,2),{(midwest,OH,2,1007,1986,$10000),(midwest,OH,2,1007,1987,$20000)})
+ * Output tuple: ((midwest,OH),{(midwest,OH,1007,1986,$10000),(midwest,OH,1007,1987,$20000)})
+ *  
  */
 
-public class PostProcess extends EvalFunc<Tuple> {
+public class PostProcessCube extends EvalFunc<Tuple> {
 
     private TupleFactory tf;
     private BagFactory bf;
-    
-    public PostProcess() {
+
+    // for debugging
+    boolean printOutputOnce = false;
+    boolean printInputOnce = false;
+
+    public PostProcessCube() {
 	this.tf = TupleFactory.getInstance();
 	this.bf = BagFactory.getInstance();
     }
+    
     /**
-     * TODO
+     * @param in - input tuple with first field as tuple and second field as bag
+     * The input tuple is from POPackage operator.
+     * @return tuple with algebraicAttribute%patitionFactor value stripped off
      */
     public Tuple exec(Tuple in) throws IOException {
-	log.info("[CUBE] Input: " + in);
-	Tuple keyTuple = (Tuple)in.get(0);
+	if (printInputOnce == false) {
+	    log.info("[CUBE] Input: " + in);
+	    printInputOnce = true;
+	}
 
-	Tuple key = tf.newTuple(keyTuple.size()-1);
-	for(int i = 0; i < keyTuple.size()-1; i++) {
+	Tuple keyTuple = (Tuple) in.get(0);
+
+	Tuple key = tf.newTuple(keyTuple.size() - 1);
+	for (int i = 0; i < keyTuple.size() - 1; i++) {
 	    key.set(i, keyTuple.get(i));
 	}
 	in.set(0, key);
 
-	DataBag valueBag = (DataBag)in.get(1);
-	int vpField = keyTuple.size()-1;
-	
+	DataBag valueBag = (DataBag) in.get(1);
+	int vpField = keyTuple.size() - 1;
+
 	Iterator<Tuple> iter = valueBag.iterator();
 	List<Tuple> resultBag = new ArrayList<Tuple>();
-	while(iter.hasNext()) {
+	while (iter.hasNext()) {
 	    Tuple tup = iter.next();
-	    Tuple newt = tf.newTuple(tup.size()-1);
+	    Tuple newt = tf.newTuple(tup.size() - 1);
 	    int idx = 0;
-	    for(int i = 0; i < tup.size(); i++) {
-		if(i != vpField) {
+	    // We copy all the fields except the field
+	    // with value partition
+	    for (int i = 0; i < tup.size(); i++) {
+		if (i != vpField) {
 		    newt.set(idx, tup.get(i));
 		    idx++;
 		}
@@ -73,10 +97,14 @@ public class PostProcess extends EvalFunc<Tuple> {
 	    resultBag.add(newt);
 	}
 	in.set(1, bf.newDefaultBag(resultBag));
-	log.info("[CUBE] Output: " + in);
+
+	if (printOutputOnce == false) {
+	    log.info("[CUBE] Output: " + in);
+	    printOutputOnce = true;
+	}
 	return in;
     }
-    
+
     public Type getReturnType() {
 	return Tuple.class;
     }

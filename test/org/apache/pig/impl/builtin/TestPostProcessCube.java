@@ -18,42 +18,46 @@
 
 package org.apache.pig.impl.builtin;
 
-import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 import java.io.IOException;
-import java.util.Set;
 
+import org.apache.pig.data.BagFactory;
 import org.apache.pig.data.DataBag;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.data.TupleFactory;
 import org.junit.Test;
 
-import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 
-public class TestHolisticCube {
+public class TestPostProcessCube {
 
     private static TupleFactory TF = TupleFactory.getInstance();
-
+    private static BagFactory BF = BagFactory.getInstance();
 
     @Test
     public void testHolisticCubeUDF() throws IOException {
-        Tuple t = TF.newTuple(Lists.newArrayList("a", "b", "c"));
-        Set<Tuple> expected = ImmutableSet.of(
-        	TF.newTuple(Lists.newArrayList("a", "b", "c")),
-                TF.newTuple(Lists.newArrayList("a", "b", null)),
-                TF.newTuple(Lists.newArrayList("a", null, null)),
-                TF.newTuple(Lists.newArrayList(null, null, null))
-        );
+	Tuple t = TF.newTuple(Lists.newArrayList("a", "b", 4));
+	Tuple inTup = TF.newTuple();
+	inTup.append(t);
 
-        String[] regions = {"region,state,city", "region,state,", "region,,", ",,"};
-        HolisticCube hcd = new HolisticCube(regions);
-        DataBag bag = hcd.exec(t);
-        assertEquals(bag.size(), expected.size());
+	DataBag inBag = BF.newDefaultBag();
+	inBag.add(TF.newTuple(Lists.newArrayList("a", "b", 4)));
+	inBag.add(TF.newTuple(Lists.newArrayList("a", null, 4)));
+	inTup.append(inBag);
 
-        for (Tuple tup : bag) {
-            assertTrue(expected.contains(tup));
-        }
+	Tuple o = TF.newTuple(Lists.newArrayList("a", "b"));
+	Tuple outTup = TF.newTuple();
+	outTup.append(o);
+
+	DataBag outBag = BF.newDefaultBag();
+	outBag.add(TF.newTuple(Lists.newArrayList("a", "b")));
+	outBag.add(TF.newTuple(Lists.newArrayList("a", null)));
+	outTup.append(outBag);
+
+	PostProcessCube ppc = new PostProcessCube();
+	Tuple result = ppc.exec(inTup);
+
+	assertTrue("Expected: " + outTup + " Got: " + result, outTup.equals(result));
     }
 }

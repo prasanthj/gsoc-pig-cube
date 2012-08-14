@@ -32,7 +32,22 @@ import org.apache.pig.data.TupleFactory;
 import org.apache.pig.impl.util.Utils;
 
 /**
- * TODO write doc
+ * This function is used in holistic cubing. The constructor of this class
+ * accepts cube lattice in string format. 
+ * For every received tuple it returns a bag of tuples with 3 fields
+ * 1st field - region of the tuple
+ * 2nd field - group value
+ * 3rd field - 1
+ * For example:
+ * Cube Lattice : {(region,state), (region,), (,state) (,)}
+ * Input Tuple: (midwest,OH)
+ * Output Bag: {((region,state),(midwest,OH),1), 
+ * 		((region,),(midwest,),1),
+ * 		((,state),(,OH),1),
+ * 		((,),(,),1)}
+ * NOTE: if the input tuple contain null valued fields then it will
+ * be converted to "unknown". For more information: refer cube operator
+ * documentation
  */
 
 public class HolisticCubeCompoundKey extends EvalFunc<DataBag> {
@@ -40,12 +55,12 @@ public class HolisticCubeCompoundKey extends EvalFunc<DataBag> {
     private TupleFactory tf;
     private BagFactory bf;
     private Log log = LogFactory.getLog(getClass());
-    private List<Tuple> cl;
+    private List<Tuple> cl; // cube lattice
 
     // for debugging
     boolean printOutputOnce = false;
     boolean printInputOnce = false;
-    
+
     public HolisticCubeCompoundKey() {
 	this(null);
     }
@@ -82,20 +97,24 @@ public class HolisticCubeCompoundKey extends EvalFunc<DataBag> {
     }
 
     /**
-     * @param in
-     *            - input tuple
-     * @return - tuple have 3 fields (compound keys) 1 - primary key - region label 2 - secondary key - group 3 - value
-     *         - 1
+     * @param in - input tuple
+     * @return Bag of tuples.
+     * Each tuple have 3 fields (compound keys) 
+     * 1 - primary key - region label 
+     * 2 - secondary key - group value corresponding to region 
+     * 3 - value - 1
      */
     public DataBag exec(Tuple in) throws IOException {
-	if( printInputOnce == false) {
+	if (printInputOnce == false) {
 	    log.info("[CUBE] Input - " + in);
 	    printInputOnce = true;
 	}
-	
+
 	if (in == null || in.size() == 0) {
 	    return null;
 	}
+
+	// null fields in the input tuple will be converted to "unknown"
 	Utils.convertNullToUnknown(in);
 	List<Tuple> groups = getAllCubeCombinations(in);
 	List<Tuple> results = new ArrayList<Tuple>(cl.size());
@@ -108,11 +127,11 @@ public class HolisticCubeCompoundKey extends EvalFunc<DataBag> {
 	    results.add(t);
 	}
 
-	if( printOutputOnce == false) {
+	if (printOutputOnce == false) {
 	    log.info("[CUBE] Output - " + bf.newDefaultBag(results));
 	    printOutputOnce = true;
 	}
-	
+
 	return bf.newDefaultBag(results);
     }
 

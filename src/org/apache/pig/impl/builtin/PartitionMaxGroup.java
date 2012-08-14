@@ -30,10 +30,20 @@ import org.apache.pig.data.Tuple;
 import org.apache.pig.data.TupleFactory;
 
 /**
- * TODO write doc TODO implement algebraic interface
+ * This UDF is used by cube operator for holistic cubing.
+ * It determines the maximum size of the group within a region. 
+ * After determining the maximum size of the group it determines
+ * the partition factor for those large groups. 
+ * The input to this UDF is a bag of tuples with following fields
+ * 1st field - region label
+ * 2nd field - group value
+ * 3..nth fields - non-dimensional fields that are pushed down
+ * Example input tuple: {((city,state), (columbus,Ohio), $1000, 2012),(..),(..)}
+ * The input bag is sorted based on the group values.
+ * The output of this UDF is partition factor for the region.
  */
 
-public class MaxGroupSize extends EvalFunc<Tuple> {
+public class PartitionMaxGroup extends EvalFunc<Tuple> {
 
     private Log log = LogFactory.getLog(getClass());
     private long totalSampleCount;
@@ -48,11 +58,7 @@ public class MaxGroupSize extends EvalFunc<Tuple> {
     boolean printOutputOnce = false;
     boolean printInputOnce = false;
 
-    public MaxGroupSize() {
-	this(null);
-    }
-
-    public MaxGroupSize(String[] args) {
+    public PartitionMaxGroup(String[] args) {
 	tf = TupleFactory.getInstance();
 	this.totalSampleCount = 0;
 	this.overallDataSize = Long.valueOf(args[0]);
@@ -63,9 +69,8 @@ public class MaxGroupSize extends EvalFunc<Tuple> {
     }
 
     /**
-     * @param in
-     *            - input tuple
-     * @return - tuple have 2 fields 1 - max group size 2 - partition factor
+     * @param in - input tuple with bag of tuples
+     * @return - tuple with partition factor for max group
      */
     public Tuple exec(Tuple in) throws IOException {
 	if (printInputOnce == false) {
@@ -118,6 +123,7 @@ public class MaxGroupSize extends EvalFunc<Tuple> {
 	    totalSampleCount = firstGroupSize;
 	    isFirstTuple = false;
 	}
+
 	partitionFactor = determinePartitionFactor(maxGroupSize, in);
 	result.set(0, partitionFactor);
 
@@ -131,15 +137,16 @@ public class MaxGroupSize extends EvalFunc<Tuple> {
     private int determinePartitionFactor(long maxGroupSize, Tuple in) throws ExecException {
 	// a region is identified reducer unfriendly if the group size is more
 	// than 0.75rN, where r is the ratio of number of tuples that a reducer
-	// can handle vs overall data size and N is the total sample size.
-	// This equation is taken from mr-cube paper.
+	// can handle vs overall data size (total #rows) and N is the total sample size.
+	// This equation is taken from mr-cube paper page #6.
 	int partitionFactor = 0;
-	//long heapMemAvail = bytesPerReducer;
-	// FOR TESTING
-	long heapMemAvail = 1000;
+	long heapMemAvail = bytesPerReducer;
 	long estTotalRows = overallDataSize / actualTupleSize;
 	if (inMemTupleSize == 0) {
 	    inMemTupleSize = getTupleSize(in);
+	    double r = ((double) (heapMemAvail / inMemTupleSize) / (double) estTotalRows);
+
+	    // prints for debugging purpose
 	    log.info("[CUBE] Overall data size in bytes: " + overallDataSize);
 	    log.info("[CUBE] Input bag memory size in bytes: " + in.getMemorySize());
 	    log.info("[CUBE] In-memory tuple size in bytes: " + inMemTupleSize);
@@ -148,16 +155,17 @@ public class MaxGroupSize extends EvalFunc<Tuple> {
 	    log.info("[CUBE] Estimated total number of rows in input dataset:" + estTotalRows);
 	    log.info("[CUBE] Total number of rows in sample:" + totalSampleCount);
 	    log.info("[CUBE] Max. tuples handled by reducer: " + heapMemAvail / inMemTupleSize);
-	    double r = ((double) (heapMemAvail / inMemTupleSize) / (double) estTotalRows);
 	    log.info("[CUBE] Ratio (r): " + r);
 	    log.info("[CUBE] Threshold: " + (0.75 * r * totalSampleCount));
 	}
+
 	long maxTuplesByReducer = heapMemAvail / inMemTupleSize;
 	double r = ((double) maxTuplesByReducer / (double) estTotalRows);
 	double threshold = 0.75 * r * totalSampleCount;
 	if (maxGroupSize > threshold) {
-	    log.info("[CUBE] Group size: " + maxGroupSize + " is reducer un-friendly.");
 	    partitionFactor = (int) Math.round(maxGroupSize / (r * totalSampleCount));
+
+	    log.info("[CUBE] Group size: " + maxGroupSize + " is reducer un-friendly.");
 	    log.info("[CUBE] REDUCER UN-FRIENDLY region. Partition factor: " + partitionFactor);
 	} else {
 	    log.info("[CUBE] Group size: " + maxGroupSize + " is reducer friendly.");
@@ -171,7 +179,7 @@ public class MaxGroupSize extends EvalFunc<Tuple> {
 	// 1st field in a tuple is a tuple with region label
 	// 2nd field in a tuple is a tuple with group values
 	// 3..nth fields are the dimensions that are pushed down from input
-	// While calculating in-memory tuple size, the region label could be
+	// While calculating in-memory tuple size, the region label can be
 	// omitted because in the actual mr-job the region label will not sent
 	// to the reducers
 	DataBag bg = (DataBag) in.get(0);

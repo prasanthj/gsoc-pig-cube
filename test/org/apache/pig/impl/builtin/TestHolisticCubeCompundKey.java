@@ -37,31 +37,27 @@ public class TestHolisticCubeCompundKey {
 
     private static TupleFactory TF = TupleFactory.getInstance();
 
-
     @Test
     public void testHolisticCubeUDF() throws IOException {
-        Tuple t = TF.newTuple(Lists.newArrayList("a", "b", "c"));
-        Tuple t1 = TF.newTuple(Lists.newArrayList("a", "b", null));
-        Tuple t2 = TF.newTuple(Lists.newArrayList("a", null, null));
-        Tuple t3 = TF.newTuple(Lists.newArrayList(null, null, null));
-        Tuple r = TF.newTuple(Lists.newArrayList("region", "state", "city"));
-        Tuple r1 = TF.newTuple(Lists.newArrayList("region", "state", null));
-        Tuple r2 = TF.newTuple(Lists.newArrayList("region", null, null));
-        Tuple r3 = TF.newTuple(Lists.newArrayList(null, null, null));
-        Set<Tuple> expected = ImmutableSet.of(
-                TF.newTuple(Lists.newArrayList(r, t, (long)1)),
-                TF.newTuple(Lists.newArrayList(r1, t1, (long)1)),
-                TF.newTuple(Lists.newArrayList(r2, t2, (long)1)),
-                TF.newTuple(Lists.newArrayList(r3, t3, (long)1))
-        );
+	Tuple t = TF.newTuple(Lists.newArrayList("a", "b", "c"));
+	Tuple t1 = TF.newTuple(Lists.newArrayList("a", "b", null));
+	Tuple t2 = TF.newTuple(Lists.newArrayList("a", null, null));
+	Tuple t3 = TF.newTuple(Lists.newArrayList(null, null, null));
+	Tuple r = TF.newTuple(Lists.newArrayList("region", "state", "city"));
+	Tuple r1 = TF.newTuple(Lists.newArrayList("region", "state", null));
+	Tuple r2 = TF.newTuple(Lists.newArrayList("region", null, null));
+	Tuple r3 = TF.newTuple(Lists.newArrayList(null, null, null));
+	Set<Tuple> expected = ImmutableSet.of(TF.newTuple(Lists.newArrayList(r, t, (long) 1)),
+	        TF.newTuple(Lists.newArrayList(r1, t1, (long) 1)), TF.newTuple(Lists.newArrayList(r2, t2, (long) 1)),
+	        TF.newTuple(Lists.newArrayList(r3, t3, (long) 1)));
 
-        String[] regions = {"region,state,city", "region,state,", "region,,", ",,"};
-        HolisticCubeCompoundKey hcd = new HolisticCubeCompoundKey(regions);
-        DataBag bag = hcd.exec(t);
-        assertEquals(bag.size(), expected.size());
+	String[] regions = { "region,state,city", "region,state,", "region,,", ",," };
+	HolisticCubeCompoundKey hcd = new HolisticCubeCompoundKey(regions);
+	DataBag bag = hcd.exec(t);
+	assertEquals(bag.size(), expected.size());
 
-        for (Tuple tup : bag) {
-            assertTrue(expected.contains(tup));
-        }
+	for (Tuple tup : bag) {
+	    assertTrue("Expected: " + expected + " Got:" + tup, expected.contains(tup));
+	}
     }
 }

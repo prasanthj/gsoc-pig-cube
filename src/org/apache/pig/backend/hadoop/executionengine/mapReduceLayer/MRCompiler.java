@@ -98,10 +98,10 @@ import org.apache.pig.impl.builtin.FindQuantiles;
 import org.apache.pig.impl.builtin.GetMemNumRows;
 import org.apache.pig.impl.builtin.HolisticCube;
 import org.apache.pig.impl.builtin.HolisticCubeCompoundKey;
-import org.apache.pig.impl.builtin.MaxGroupSize;
+import org.apache.pig.impl.builtin.PartitionMaxGroup;
 import org.apache.pig.impl.builtin.PartitionSkewedKeys;
 import org.apache.pig.impl.builtin.PoissonSampleLoader;
-import org.apache.pig.impl.builtin.PostProcess;
+import org.apache.pig.impl.builtin.PostProcessCube;
 import org.apache.pig.impl.builtin.RandomSampleLoader;
 import org.apache.pig.impl.io.FileLocalizer;
 import org.apache.pig.impl.io.FileSpec;
@@ -1808,9 +1808,11 @@ public class MRCompiler extends PhyPlanVisitor {
 
     public void visitCube(POCube op) throws VisitorException {
 	// if the measure is not holistic we do not need mr-cube approach
-	// we can fallback to naive approach
+	// we can fallback to naive approach. Also in illustrate mode
+	// we can just illustrate using the naive approach
 	if (op.isHolistic() == true && !pigContext.inIllustrator) {
 	    try {
+		// cube lattice should be generated while building logical plan itself
 		if (op.getCubeLattice() == null) {
 		    int errCode = 2167;
 		    String msg = "Measure is holistic but Cube Lattice is null";
@@ -1837,27 +1839,31 @@ public class MRCompiler extends PhyPlanVisitor {
 			// continue compilation of original plan sequence
 			curMROp = prevJob;
 
-			// setting up the result of sample job which is the annotated lattice
+			// setting up the result of sample job (which is the annotated lattice)
 			// to the curMROp. This file will be distributed using distributed cache
-			// to all mappers running the actual cube materialization job
+			// to all mappers running the actual full cube materialization job
 			curMROp.setAnnotatedLatticeFile(sampleJobOutput.getFileName());
 			curMROp.setFullCubeJob(true);
-			curMROp.requestedParallelism =  op.getRequestedParallelism();
+			curMROp.requestedParallelism = op.getRequestedParallelism();
 
 			byte algAttrType = modifyCubeUDFsForHolisticMeasure(op, sampleJobOutput.getFileName());
 			compiledInputs[0] = curMROp;
-			
+
 			addAlgAttrColToLR(op, algAttrType);
-			
+
 			curMROp.setMapDone(true);
 			curMROp.setReduceDone(false);
+
+			// value partition output should be stored
+			// before post processing
 			FileSpec vpOutput = getTempFileSpec();
 			endSingleInputPlanWithStr(vpOutput);
-			
+
+			// post process job
 			MapReduceOper ppMro = startNew(vpOutput, curMROp);
 			curMROp = ppMro;
 			curMROp.setFullCubeJob(false);
-			
+
 			insertPostProcessJob(ppMro, op, vpOutput);
 			compiledInputs[0] = curMROp;
 		    }
@@ -1874,10 +1880,12 @@ public class MRCompiler extends PhyPlanVisitor {
 	}
     }
 
+    // This function adds the algebraic attribute column in dimensional list
+    // which now contains algebraicAttribute%partitionFactor value to LocalRearrange
     private void addAlgAttrColToLR(POCube op, byte algAttrType) throws PlanException {
 	PhysicalPlan mapPlan = curMROp.mapPlan;
 	PhysicalOperator succ = (PhysicalOperator) mapPlan.getLeaves().get(0);
-	if( succ instanceof POLocalRearrange) {
+	if (succ instanceof POLocalRearrange) {
 	    List<PhysicalPlan> inps = ((POLocalRearrange) succ).getPlans();
 	    PhysicalPlan pplan = new PhysicalPlan();
 	    POProject proj = new POProject(new OperatorKey(scope, nig.getNextNodeId(scope)));
@@ -1889,17 +1897,23 @@ public class MRCompiler extends PhyPlanVisitor {
 	}
     }
 
+    // This function determines the sampling percentage based on the estimated
+    // total number of rows in the input dataset.
     private double determineSamplePercentage(POCube op) throws IOException {
 	PhysicalOperator opRoot = null;
 	List<MapReduceOper> roots = MRPlan.getRoots();
 	long inputFileSize = 0;
 	long actualTupleSize = 0;
 	long estTotalRows = 0;
-	double sampleSize = 0;
+	double sampleSize = 0.0;
 
 	if (roots.size() > 1) {
-	    // TODO what to do if there are two loads?
-	    // should take the output of join or cogroup?
+	    // FIXME what to do if there are two loads?
+	    // what if cube operator predecessor is not
+	    // load? should take the output of join or cogroup?
+	    // if predecessor is not load then actual tuple size
+	    // cannot be estimated (only in-memory tuple size can
+	    // be determined)
 	} else {
 	    PhysicalPlan mapPlan = roots.get(0).mapPlan;
 	    opRoot = mapPlan.getRoots().get(0);
@@ -1909,15 +1923,16 @@ public class MRCompiler extends PhyPlanVisitor {
 		actualTupleSize = getActualTupleSize((POLoad) opRoot);
 		estTotalRows = inputFileSize / actualTupleSize;
 
-		// Refer mr-cube paper for sample selection
+		// Refer mr-cube paper (http://arnab.org/files/mrcube.pdf)
+		// page #6 for sample selection and experimentation
 		if (estTotalRows > 2000000000) {
 		    // for #rows beyond 2B, 2M samples are sufficient
-		    sampleSize = (double)2000000 / (double)estTotalRows;
+		    sampleSize = (double) 2000000 / (double) estTotalRows;
 		} else if (estTotalRows > 2000000 && estTotalRows < 2000000000) {
 		    // for #rows between 2M to 2B, 100K tuples are sufficient
-		    sampleSize = (double)100000 / (double)estTotalRows;
+		    sampleSize = (double) 100000 / (double) estTotalRows;
 		} else {
-		    sampleSize = 0.5;
+		    sampleSize = 0.0;
 		}
 	    }
 	}
@@ -1925,14 +1940,16 @@ public class MRCompiler extends PhyPlanVisitor {
 	return sampleSize;
     }
 
-    // FIXME Try if this works if the query contains two separate cube operators
+    // This method modifies the map plan containing CubeDimensions/RollupDimensions and replaces
+    // it will HolisticCube UDF.
+    // FIXME Try if this works for query containing two cube operators.
     private byte modifyCubeUDFsForHolisticMeasure(POCube op, String annotatedLatticeFile) throws IOException {
 	byte algAttrType = DataType.BYTEARRAY;
 	PhysicalPlan mapPlan = curMROp.mapPlan;
 	Map<OperatorKey, PhysicalOperator> poMap = mapPlan.getKeys();
 
-	// Iterate through the plan to get the inputs for HolisticCubeDimensions UDF
-	// which is the combination of projections of all CubeDimensions/RollupDimensions UDFs
+	// Iterate through the plan to get the inputs for HolisticCube UDF
+	// i.e. all projections from CubeDimensions/RollupDimensions UDFs
 	for (Map.Entry<OperatorKey, PhysicalOperator> entry : poMap.entrySet()) {
 	    PhysicalOperator pop = entry.getValue();
 	    if (pop instanceof POForEach) {
@@ -1940,21 +1957,21 @@ public class MRCompiler extends PhyPlanVisitor {
 
 		String[] ufArgs = new String[op.getCubeLattice().size()];
 		getLatticeAsStringArray(ufArgs, op.getCubeLattice());
-		PhysicalPlan hplan = new PhysicalPlan();
-		POUserFunc hUserFunc = new POUserFunc(new OperatorKey(scope, nig.getNextNodeId(scope)), op.getRequestedParallelism(), null,
-		        new FuncSpec(HolisticCube.class.getName(), ufArgs));
+		PhysicalPlan dimPlan = new PhysicalPlan();
+		POUserFunc hUserFunc = new POUserFunc(new OperatorKey(scope, nig.getNextNodeId(scope)),
+		        op.getRequestedParallelism(), null, new FuncSpec(HolisticCube.class.getName(), ufArgs));
 		hUserFunc.setResultType(DataType.BAG);
-		hplan.add(hUserFunc);
+		dimPlan.add(hUserFunc);
 
 		List<PhysicalPlan> feIPlans = new ArrayList<PhysicalPlan>();
 		List<Boolean> feFlat = new ArrayList<Boolean>();
-		feIPlans.add(hplan);
+		feIPlans.add(dimPlan);
 		feFlat.add(true);
 
 		// connect the dimensions from CubeDimensions and RollupDimensions UDF to
-		// a separate foreach operator. Once all dimensions are connected replace the
-		// existing foreach operator with the newly created foreach operator that
-		// contains HolisticCubeDimensions UDF with all the user specified dimensions
+		// a separate foreach operator containing HolisticCube UDF.
+		// Once all dimensions are connected replace the existing foreach operator
+		// with the newly created foreach operator
 		for (PhysicalPlan pp : ((POForEach) pop).getInputPlans()) {
 		    for (PhysicalOperator leaf : pp.getLeaves()) {
 			if (leaf instanceof POUserFunc) {
@@ -1962,72 +1979,79 @@ public class MRCompiler extends PhyPlanVisitor {
 			    if (className.equals(CubeDimensions.class.getName()) == true) {
 				isForeachInsertedByCube = true;
 				for (PhysicalOperator expOp : ((POUserFunc) leaf).getInputs()) {
-				    hplan.add(expOp);
+				    dimPlan.add(expOp);
 				    // if its a cast operator then connect the inner projections
 				    if (expOp instanceof POCast) {
 					for (PhysicalOperator projOp : ((POCast) expOp).getInputs()) {
-					    hplan.add(projOp);
-					    hplan.connect(projOp, expOp);
+					    dimPlan.add(projOp);
+					    dimPlan.connect(projOp, expOp);
 					}
 				    }
-				    hplan.connect(expOp, hUserFunc);
+				    dimPlan.connect(expOp, hUserFunc);
 				}
 
 			    } else if (className.equals(RollupDimensions.class.getName()) == true) {
 				isForeachInsertedByCube = true;
 				for (PhysicalOperator expOp : ((POUserFunc) leaf).getInputs()) {
-				    hplan.add(expOp);
+				    dimPlan.add(expOp);
 				    // if its a cast operator then connect the inner projections
 				    if (expOp instanceof POCast) {
 					for (PhysicalOperator projOp : ((POCast) expOp).getInputs()) {
-					    hplan.add(projOp);
-					    hplan.connect(projOp, expOp);
+					    dimPlan.add(projOp);
+					    dimPlan.connect(projOp, expOp);
 					}
 				    }
-				    hplan.connect(expOp, hUserFunc);
+				    dimPlan.connect(expOp, hUserFunc);
 				}
 			    }
 			} else {
-			    PhysicalPlan pplan = new PhysicalPlan();
+			    // if not UserFunc then it will be ProjectExpression/CastExpression.
+			    // These projections will be the non-dimensional columns.
+			    // Find the algebraic attribute column from the non-dimensional
+			    // columns and project a clone of it as a last dimensional column.
+
+			    PhysicalPlan nonDimPlan = new PhysicalPlan();
 
 			    // if its a cast operator then connect the inner projections
 			    if (leaf instanceof POCast) {
-				for (PhysicalOperator projOp : ((POCast) leaf).getInputs()) {
-				    // these non-dimensional columns are projected only after UDFs
+				for (PhysicalOperator castInp : ((POCast) leaf).getInputs()) {
+				    // these non-dimensional columns are projected only after UserFuncExpressions
 				    // so we can be sure that the algebraic attribute will be the
 				    // last one to be appended to dimensions list
 				    if (op.getAlgebraicAttr().equals(((POCast) leaf).getFieldSchema().getName()) == true) {
 					try {
 					    POCast cloneCast = (POCast) leaf.clone();
-					    hplan.add(cloneCast);
-					    pplan.add(leaf);
-					    algAttrType = ((POCast)leaf).getResultType();
+					    // add cloned copy to dimension list and original one to non-dimensional
+					    // list
+					    dimPlan.add(cloneCast);
+					    nonDimPlan.add(leaf);
+					    algAttrType = ((POCast) leaf).getResultType();
 					    for (PhysicalOperator hprojOp : ((POCast) leaf).getInputs()) {
 						POProject cloneProj = (POProject) hprojOp.clone();
 						cloneProj.setInputs(hprojOp.getInputs());
-						
+
 						List<PhysicalOperator> castInps = new ArrayList<PhysicalOperator>();
 						castInps.add(cloneProj);
 						cloneCast.setInputs(castInps);
-						
-						hplan.add(cloneProj);
-						hplan.connect(cloneProj, cloneCast);
-					
-						pplan.add(projOp);
-						pplan.connect(projOp, leaf);
+
+						dimPlan.add(cloneProj);
+						dimPlan.connect(cloneProj, cloneCast);
+
+						nonDimPlan.add(castInp);
+						nonDimPlan.connect(castInp, leaf);
 					    }
-					    hplan.connect(cloneCast, hUserFunc);
-					    feIPlans.add(pplan);
+					    dimPlan.connect(cloneCast, hUserFunc);
+					    feIPlans.add(nonDimPlan);
 					    feFlat.add(false);
 					} catch (CloneNotSupportedException e) {
 					    throw new PlanException(e);
 					}
 
 				    } else {
-					pplan.add(leaf);
-					pplan.add(projOp);
-					pplan.connect(projOp, leaf);
-					feIPlans.add(pplan);
+					nonDimPlan.add(leaf);
+					nonDimPlan.add(castInp);
+					nonDimPlan.connect(castInp, leaf);
+					feIPlans.add(nonDimPlan);
 					feFlat.add(false);
 				    }
 				}
@@ -2048,50 +2072,63 @@ public class MRCompiler extends PhyPlanVisitor {
 			}
 		    }
 		}
+
+		// check if new foreach is inserted successfully into plan and replace it with old foreach
 		if (isForeachInsertedByCube == true) {
 		    POForEach foreach = new POForEach(new OperatorKey(scope, nig.getNextNodeId(scope)),
 			    op.getRequestedParallelism(), feIPlans, feFlat);
 		    foreach.addOriginalLocation(pop.getAlias(), pop.getOriginalLocations());
 		    foreach.setInputs(pop.getInputs());
 		    mapPlan.replace(pop, foreach);
-		  
-		    // at this place we have modified the plan to fit the HolisticCubeDimensions UDF
+
+		    // at this place we have modified the plan to fit the HolisticCube UDF
 		    // FIXME if this is allowed to continue then ConcurrentModificationException occurs
 		    break;
 		}
 	    }
 	}
-	
+
 	return algAttrType;
     }
 
-
-    private void insertPostProcessJob(MapReduceOper ppMro, POCube op, FileSpec vpOutput) throws VisitorException, PlanException {
+    // This function inserts final post processing job. The PostProcessCube UDF essentially strips off
+    // algebraicAttribute%partitionFactor value from the output
+    private void insertPostProcessJob(MapReduceOper ppMro, POCube op, FileSpec vpOutput) throws VisitorException,
+	    PlanException {
 	PhysicalPlan mapPlan = curMROp.mapPlan;
-	
+
 	List<PhysicalPlan> feIPlans = new ArrayList<PhysicalPlan>();
 	List<Boolean> feFlat = new ArrayList<Boolean>();
 	POForEach foreach = null;
 
-	PhysicalPlan hPlan = new PhysicalPlan();
+	PhysicalPlan fPlan = new PhysicalPlan();
 	POProject projStar = new POProject(new OperatorKey(scope, nig.getNextNodeId(scope)));
 	projStar.setStar(true);
-	hPlan.add(projStar);
-	
-	POUserFunc userFunc = new POUserFunc(new OperatorKey(scope, nig.getNextNodeId(scope)), op.getRequestedParallelism(), null, 
-					new FuncSpec(PostProcess.class.getName()));
+	fPlan.add(projStar);
+
+	POUserFunc userFunc = new POUserFunc(new OperatorKey(scope, nig.getNextNodeId(scope)),
+	        op.getRequestedParallelism(), null, new FuncSpec(PostProcessCube.class.getName()));
 	userFunc.setResultType(DataType.TUPLE);
-	hPlan.add(userFunc);
-	hPlan.connect(projStar, userFunc);
-	feIPlans.add(hPlan);
+	fPlan.add(userFunc);
+	fPlan.connect(projStar, userFunc);
+	feIPlans.add(fPlan);
 	feFlat.add(true);
-	
+
 	foreach = new POForEach(new OperatorKey(scope, nig.getNextNodeId(scope)), -1, feIPlans, feFlat);
 	foreach.setResultType(DataType.BAG);
 	mapPlan.addAsLeaf(foreach);
     }
 
-
+    // This method modifies the current mr-plan to insert a new sampling job.
+    // This function contains the following sequence of operatos
+    // 1) POLoad
+    // 2) POForEach with star projection
+    // 3) POFilter with ConstantExpression containing sample size and LessThanExpr
+    // The way POFilter is used is similar to the way SAMPLE operator works
+    // 4) POForEach with HolisticCubeCompoundKey UDF
+    // 5) POLocalRearrange
+    // 6) POGlobalRearrange
+    // 7) Finally attaches a reduce plan
     private MapReduceOper getCubeSampleJob(POCube op, MapReduceOper prevJob, double sampleSize, FileSpec sampleJobOutput)
 	    throws VisitorException {
 	try {
@@ -2111,12 +2148,10 @@ public class MRCompiler extends PhyPlanVisitor {
 	    List<MapReduceOper> roots = MRPlan.getRoots();
 
 	    // FIXME what if the input of cube is not load?
-	    // convert it to a generic case
+	    // convert it to a generic case?
 	    // get the inputs of cube and then perform sampling on that input
-
 	    if (roots.size() > 1) {
-		// TODO what to do if there are two loads?
-		// should take the output of join or cogroup?
+		// FIXME what to do if there are two loads?
 	    } else {
 		PhysicalPlan mapPlan = roots.get(0).mapPlan;
 		opRoot = mapPlan.getRoots().get(0);
@@ -2127,12 +2162,14 @@ public class MRCompiler extends PhyPlanVisitor {
 		    actualTupleSize = getActualTupleSize((POLoad) opRoot);
 		}
 
-		// populate foreach operator from the physical plan.
 		// if the predecessor of cube operator is load then there will
 		// be a foreach plan with CubeDimensions/RollupDimensions UDFs
 		// we do not need those udfs for sampling we just need the dimension
 		// columns and non-dimensional columns. The CubeDimensions/RollupDimensions
-		// UDF will be replaced by HolisticCubeCompoundKey UDF
+		// UDF will be replaced by HolisticCubeCompoundKey UDF with all the
+		// dimension columns attached to it.
+
+		// Foreach with star projection
 		List<PhysicalPlan> feIPlans = new ArrayList<PhysicalPlan>();
 		List<Boolean> feFlat = new ArrayList<Boolean>();
 
@@ -2158,43 +2195,42 @@ public class MRCompiler extends PhyPlanVisitor {
 				}
 			    } else {
 				// The non-dimensional columns will be pushed down.
-				// these columns might be used later by measures
+				// these columns will be used later by measures
 				nonDimOperators.add(pOp);
-
 			    }
 			}
 		    }
 		}
 	    }
 
-	    // Enable filter plan if sample selection is based on sample operator
+	    // Filter plan replicating the SAMPLE operator
 	    POFilter filter = new POFilter(new OperatorKey(scope, nig.getNextNodeId(scope)));
 	    filter.setResultType(DataType.BAG);
 	    filter.visit(this);
 
-	    PhysicalPlan ltp = new PhysicalPlan();
-	    // plan for filter
-	    POUserFunc uf = new POUserFunc(new OperatorKey(scope, nig.getNextNodeId(scope)), -1, null, new FuncSpec(
-		    RANDOM.class.getName()));
-	    uf.setResultType(DataType.DOUBLE);
-	    ltp.add(uf);
+	    PhysicalPlan filterInnerPlan = new PhysicalPlan();
+	    POUserFunc randomUF = new POUserFunc(new OperatorKey(scope, nig.getNextNodeId(scope)), -1, null,
+		    new FuncSpec(RANDOM.class.getName()));
+	    randomUF.setResultType(DataType.DOUBLE);
+	    filterInnerPlan.add(randomUF);
 
 	    ConstantExpression ce = new ConstantExpression(new OperatorKey(scope, nig.getNextNodeId(scope)));
 	    ce.setValue(sampleSize);
 	    ce.setResultType(DataType.DOUBLE);
-	    ltp.add(ce);
+	    filterInnerPlan.add(ce);
 
 	    LessThanExpr le = new LessThanExpr(new OperatorKey(scope, nig.getNextNodeId(scope)));
 	    le.setResultType(DataType.BOOLEAN);
 	    le.setOperandType(DataType.DOUBLE);
-	    le.setLhs(uf);
+	    le.setLhs(randomUF);
 	    le.setRhs(ce);
-	    ltp.add(le);
+	    filterInnerPlan.add(le);
 
-	    ltp.connect(uf, le);
-	    ltp.connect(ce, le);
-	    filter.setPlan(ltp);
+	    filterInnerPlan.connect(randomUF, le);
+	    filterInnerPlan.connect(ce, le);
+	    filter.setPlan(filterInnerPlan);
 
+	    // Foreach plan with HolisticCubeCoupundKey UDF
 	    List<PhysicalPlan> foreachInpPlans = new ArrayList<PhysicalPlan>();
 	    PhysicalPlan userFuncPlan = new PhysicalPlan();
 	    String[] lattice = new String[op.getCubeLattice().size()];
@@ -2249,6 +2285,7 @@ public class MRCompiler extends PhyPlanVisitor {
 	    fe.setResultType(DataType.BAG);
 	    fe.visit(this);
 
+	    // Rearrange operations
 	    List<PhysicalPlan> lrPlans = new ArrayList<PhysicalPlan>();
 	    PhysicalPlan lrPlan = new PhysicalPlan();
 
@@ -2278,23 +2315,27 @@ public class MRCompiler extends PhyPlanVisitor {
 	    gr.setResultType(DataType.TUPLE);
 	    gr.visit(this);
 
-	    generateReducePlan(op, mro, sampleJobOutput, actualTupleSize, inputFileSize);
+	    // generate the reduce plan for this sampling job
+	    generateReducePlanSampleJob(op, mro, sampleJobOutput, actualTupleSize, inputFileSize);
 	    return mro;
 	} catch (PlanException e) {
-	    int errCode = 2034;
+	    int errCode = 2167;
 	    String msg = "Error compiling operator " + op.getClass().getSimpleName();
 	    throw new MRCompilerException(msg, errCode, PigException.BUG, e);
 	} catch (ExecException e) {
-	    int errCode = 2034;
+	    int errCode = 2167;
 	    String msg = "Error compiling operator " + op.getClass().getSimpleName();
 	    throw new MRCompilerException(msg, errCode, PigException.BUG, e);
 	} catch (IOException e) {
-	    int errCode = 2034;
+	    int errCode = 2167;
 	    String msg = "Error compiling operator " + op.getClass().getSimpleName();
 	    throw new MRCompilerException(msg, errCode, PigException.BUG, e);
 	}
     }
 
+    // Relies on InputSizeReducerEstimator for getting the total file size
+    // It will try to determine the file size from the loader or fallback
+    // to HDFS to get the file size
     private long getInputFileSize(POLoad proot) throws IOException {
 	Configuration conf = new Configuration();
 	List<POLoad> loads = new ArrayList<POLoad>();
@@ -2303,11 +2344,12 @@ public class MRCompiler extends PhyPlanVisitor {
     }
 
     // FIXME ReadSingleLoader loads only the first tuple in the dataset
-    // to find the raw tuple size. This will not be accurate because the
-    // tuples may have variable size (tuples using bytearray/chararray have 
-    // size and in some rows tuples will not have certain fields). Hence need 
-    // to figure out a better way for finding the average raw tuple size. 
-    // Because of this estimation of number of rows will be have high error rate
+    // to find the raw tuple size. This will not be accurate because some
+    // fields may have variable size (bytearray/chararray, empty values for
+    // certain fields). Hence need to figure out a better way for finding the
+    // average raw tuple size. Because of this estimation of number of rows will
+    // have high error rate.
+    // Try: Read n random samples and then determine the average tuple size
     private long getActualTupleSize(POLoad proot) throws IOException {
 	long size = 0;
 	Configuration conf = new Configuration();
@@ -2325,8 +2367,14 @@ public class MRCompiler extends PhyPlanVisitor {
 	return conf.getLong(PigReducerEstimator.BYTES_PER_REDUCER_PARAM, PigReducerEstimator.DEFAULT_BYTES_PER_REDUCER);
     }
 
-    private void generateReducePlan(POCube op, MapReduceOper mro, FileSpec sampleJobOutput, long actualTupleSize,
-	    long overallDataSize) throws VisitorException {
+    // This method generates reduce plan for cube sample job.
+    // It inserts the following operators to the plan
+    // 1) POPackage
+    // 2) POForEach with PartitionMaxGroup UDF
+    // 3) POSort for enabling secondary sort
+    // 4) End the plan by storing the annotated lattice
+    private void generateReducePlanSampleJob(POCube op, MapReduceOper mro, FileSpec sampleJobOutput,
+	    long actualTupleSize, long overallDataSize) throws VisitorException {
 	try {
 	    // create POPackage
 	    POPackage pkg = new POPackage(new OperatorKey(scope, nig.getNextNodeId(scope)));
@@ -2337,6 +2385,7 @@ public class MRCompiler extends PhyPlanVisitor {
 	    pkg.setInner(inner);
 	    pkg.visit(this);
 
+	    // Foreach with PartitionMaxGroup UDF
 	    List<PhysicalPlan> inpPlans = new ArrayList<PhysicalPlan>();
 	    List<Boolean> flat = new ArrayList<Boolean>();
 
@@ -2354,17 +2403,20 @@ public class MRCompiler extends PhyPlanVisitor {
 	    ufArgs[1] = String.valueOf(getBytesPerReducer());
 	    ufArgs[2] = String.valueOf(actualTupleSize);
 	    POUserFunc uf = new POUserFunc(new OperatorKey(scope, nig.getNextNodeId(scope)), -1, null, new FuncSpec(
-		    MaxGroupSize.class.getName(), ufArgs));
+		    PartitionMaxGroup.class.getName(), ufArgs));
 	    uf.setResultType(DataType.TUPLE);
 	    ufPlan.add(uf);
 	    flat.add(true);
 
+	    // project only the value from package operator. key is not required since the value itself contains
+	    // the key in 1st field of each tuple
 	    POProject ufProj = new POProject(new OperatorKey(scope, nig.getNextNodeId(scope)));
 	    ufProj.setColumn(1);
 	    ufProj.setResultType(DataType.BAG);
 	    ufPlan.add(ufProj);
 	    inpPlans.add(ufPlan);
 
+	    // enable secondary sort on group values
 	    List<Boolean> ascCol = new ArrayList<Boolean>();
 	    List<PhysicalPlan> sortPlans = new ArrayList<PhysicalPlan>();
 	    ascCol.add(false);
@@ -2387,19 +2439,23 @@ public class MRCompiler extends PhyPlanVisitor {
 	    ufPlan.connect(ufProj, sort);
 	    ufPlan.connect(sort, uf);
 
-	    // create ForEach with MaxGroupSize for finding the group size
+	    // create ForEach with PartitionMaxGroup for finding the group size
 	    POForEach fe = new POForEach(new OperatorKey(scope, nig.getNextNodeId(scope)),
 		    op.getRequestedParallelism(), inpPlans, flat);
 	    fe.setResultType(DataType.BAG);
 	    fe.visit(this);
 
+	    // finally store the annotated lattice to HDFS
+	    // this file will contains tuples with 2 fields
+	    // 1st field - region label
+	    // 2nd field - partition factor
 	    endSingleInputPlanWithStr(sampleJobOutput);
 	} catch (PlanException e) {
-	    int errCode = 2034;
+	    int errCode = 2167;
 	    String msg = "Error compiling operator " + op.getClass().getSimpleName();
 	    throw new MRCompilerException(msg, errCode, PigException.BUG, e);
 	} catch (IOException e) {
-	    int errCode = 2034;
+	    int errCode = 2167;
 	    String msg = "Error compiling operator " + op.getClass().getSimpleName();
 	    throw new MRCompilerException(msg, errCode, PigException.BUG, e);
 	}

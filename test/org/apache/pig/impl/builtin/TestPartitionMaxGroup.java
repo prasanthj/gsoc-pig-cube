@@ -18,22 +18,23 @@
 
 package org.apache.pig.impl.builtin;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import org.apache.pig.data.BagFactory;
 import org.apache.pig.data.DataBag;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.data.TupleFactory;
-import org.apache.pig.impl.builtin.MaxGroupSize;
 import org.junit.Test;
 
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 
-public class TestMaxGroupSize {
+public class TestPartitionMaxGroup {
 
     private static TupleFactory TF = TupleFactory.getInstance();
     private static BagFactory BF = BagFactory.getInstance();
@@ -77,10 +78,14 @@ public class TestMaxGroupSize {
 	Tuple in = TF.newTuple();
 	in.append(bag);
 
-	Tuple expected = TF.newTuple(Lists.newArrayList("region", "state", (long) 3, (int) 0));
-	MaxGroupSize mgs = new MaxGroupSize();
+	Set<Tuple> expected = ImmutableSet.of(TF.newTuple(Lists.newArrayList((int) 20)));
+	String[] ufArgs = new String[3];
+	ufArgs[0] = "10000";
+	ufArgs[1] = "1000";
+	ufArgs[2] = "100";
+	PartitionMaxGroup mgs = new PartitionMaxGroup(ufArgs);
 	Tuple result = mgs.exec(in);
 
-	assertEquals("Expected: " + expected + " Got: " + result, expected.equals(result));
+	assertTrue("Expected: " + expected + " Got:" + result, expected.contains(result));
     }
 }
