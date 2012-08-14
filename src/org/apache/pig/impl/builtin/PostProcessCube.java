@@ -49,10 +49,6 @@ public class PostProcessCube extends EvalFunc<Tuple> {
     private TupleFactory tf;
     private BagFactory bf;
 
-    // for debugging
-    boolean printOutputOnce = false;
-    boolean printInputOnce = false;
-
     public PostProcessCube() {
 	this.tf = TupleFactory.getInstance();
 	this.bf = BagFactory.getInstance();
@@ -64,10 +60,6 @@ public class PostProcessCube extends EvalFunc<Tuple> {
      * @return tuple with algebraicAttribute%patitionFactor value stripped off
      */
     public Tuple exec(Tuple in) throws IOException {
-	if (printInputOnce == false) {
-	    log.info("[CUBE] Input: " + in);
-	    printInputOnce = true;
-	}
 
 	Tuple keyTuple = (Tuple) in.get(0);
 
@@ -98,10 +90,6 @@ public class PostProcessCube extends EvalFunc<Tuple> {
 	}
 	in.set(1, bf.newDefaultBag(resultBag));
 
-	if (printOutputOnce == false) {
-	    log.info("[CUBE] Output: " + in);
-	    printOutputOnce = true;
-	}
 	return in;
     }
 

@@ -694,32 +694,34 @@ public class JobControlCompiler{
                 }
             }
 
-            if (mro.isFullCubeJob()) {
-        	String symlink = addSingleFileToDistributedCache(pigContext, conf, mro.getAnnotatedLatticeFile(), "annotatedlattice");
-        	conf.set("pig.annotatedLatticeFile", symlink);
-        	// FIXME do we need to set the estimated reducer here?
-//        	int urp = mro.getRequestedParallelism();
-//        	int erp = estimateParallelismForCubeJob(conf, mro);
-//        	if( urp < erp ) {
-//        	    // set the runtime #reducer of the next job as the #partition
-//        	    ParallelConstantVisitor visitor =
-//        		    new ParallelConstantVisitor(mro.reducePlan, erp);
-//        	    visitor.visit();
-//
-//        	    log.info("[CUBE] Requested parallelism ("+urp+") is less than the estimated parallelism ("+erp+"). Setting runtime parallelism to estimated value: " + erp);
-//
-//        	    // set various parallelism into the job conf for later analysis
-//        	    conf.setInt("pig.info.reducers.default.parallel", pigContext.defaultParallel);
-//        	    conf.setInt("pig.info.reducers.requested.parallel", mro.requestedParallelism);
-//        	    conf.setInt("pig.info.reducers.estimated.parallel", mro.estimatedParallelism);
-//
-//        	    // this is for backward compatibility, and we encourage to use runtimeParallelism at runtime
-//        	    mro.requestedParallelism = erp;
-//
-//        	    // finally set the number of reducers
-//        	    conf.setInt("mapred.reduce.tasks", erp);
-//        	}
-            }
+	    if (mro.isFullCubeJob()) {
+		String symlink = addSingleFileToDistributedCache(pigContext, conf, mro.getAnnotatedLatticeFile(),
+		        "annotatedlattice");
+		conf.set("pig.annotatedLatticeFile", symlink);
+		// FIXME do we need to set the estimated reducer here?
+		// int urp = mro.getRequestedParallelism();
+		// int erp = estimateParallelismForCubeJob(conf, mro);
+		// if( urp < erp ) {
+		// // set the runtime #reducer of the next job as the #partition
+		// ParallelConstantVisitor visitor =
+		// new ParallelConstantVisitor(mro.reducePlan, erp);
+		// visitor.visit();
+		//
+		// log.info("[CUBE] Requested parallelism ("+urp+") is less than the estimated parallelism ("+erp+"). Setting runtime parallelism to estimated value: "
+		// + erp);
+		//
+		// // set various parallelism into the job conf for later analysis
+		// conf.setInt("pig.info.reducers.default.parallel", pigContext.defaultParallel);
+		// conf.setInt("pig.info.reducers.requested.parallel", mro.requestedParallelism);
+		// conf.setInt("pig.info.reducers.estimated.parallel", mro.estimatedParallelism);
+		//
+		// // this is for backward compatibility, and we encourage to use runtimeParallelism at runtime
+		// mro.requestedParallelism = erp;
+		//
+		// // finally set the number of reducers
+		// conf.setInt("mapred.reduce.tasks", erp);
+		// }
+	    }
             
             if (mro.isSkewedJoin()) {
                 String symlink = addSingleFileToDistributedCache(pigContext,
