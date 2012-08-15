@@ -33,6 +33,15 @@ public class POCube extends PhysicalOperator {
     private String algebraicAttr;
     private int algebraicAttrCol;
     private List<Tuple> cubeLattice;
+    private String holisticMeasure;
+    private boolean isPostAggRequired;
+    private PhysicalOperator postAggLR;
+    private int numDimensions;
+
+    // Holistic measures. These values will be used during post processing stage and
+    // also when printing MRPlan
+    public static final String HOLISTIC_COUNT_DISTINCT = "count_distinct";
+    public static final String HOLISTIC_TOPK = "topk";
 
     public POCube(OperatorKey k, int rp) {
 	this(k, rp, null, false, null);
@@ -43,6 +52,10 @@ public class POCube extends PhysicalOperator {
 	this.isHolistic = isHolistic;
 	this.algebraicAttr = algebraicAttr;
 	this.cubeLattice = null;
+	this.holisticMeasure = null;
+	this.isPostAggRequired = false;
+	this.postAggLR = null;
+	this.numDimensions = 0;
     }
 
     /**
@@ -74,11 +87,12 @@ public class POCube extends PhysicalOperator {
     public String name() {
 	String measure;
 	if (isHolistic) {
-	    measure = "holistic[" + this.getAlgebraicAttr() + "]";
+	    measure = "holistic[" + this.getHolisticMeasure() + "]";
 	} else {
 	    measure = "algebraic";
 	}
-	return getAliasString() + "POCube[" + DataType.findTypeName(resultType) + "]" + " Measure - " + measure + " - " + mKey.toString();
+	return getAliasString() + "POCube[" + DataType.findTypeName(resultType) + "]" + " Measure - " + measure + " - "
+	        + mKey.toString();
     }
 
     public boolean isHolistic() {
@@ -111,5 +125,37 @@ public class POCube extends PhysicalOperator {
 
     public void setAlgebraicAttrCol(int algebraicAttrCol) {
 	this.algebraicAttrCol = algebraicAttrCol;
+    }
+
+    public String getHolisticMeasure() {
+	return holisticMeasure;
+    }
+
+    public void setHolisticMeasure(String holisticMeasure) {
+	this.holisticMeasure = holisticMeasure;
+    }
+
+    public boolean isPostAggRequired() {
+	return isPostAggRequired;
+    }
+
+    public void setPostAggRequired(boolean isPostAggRequired) {
+	this.isPostAggRequired = isPostAggRequired;
+    }
+
+    public PhysicalOperator getPostAggLR() {
+	return postAggLR;
+    }
+
+    public void setPostAggLR(PhysicalOperator postAggLR) {
+	this.postAggLR = postAggLR;
+    }
+
+    public int getNumDimensions() {
+	return numDimensions;
+    }
+
+    public void setNumDimensions(int numDimensions) {
+	this.numDimensions = numDimensions;
     }
 }

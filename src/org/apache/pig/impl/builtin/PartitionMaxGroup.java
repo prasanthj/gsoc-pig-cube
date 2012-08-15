@@ -53,6 +53,7 @@ public class PartitionMaxGroup extends EvalFunc<Tuple> {
     private long overallDataSize;
     private boolean isFirstTuple;
     private long bytesPerReducer;
+    private double percentMemUsage;
 
     // for debugging
     boolean printOutputOnce = false;
@@ -64,6 +65,7 @@ public class PartitionMaxGroup extends EvalFunc<Tuple> {
 	this.overallDataSize = Long.valueOf(args[0]);
 	this.bytesPerReducer = Long.valueOf(args[1]);
 	this.actualTupleSize = Long.valueOf(args[2]);
+	this.percentMemUsage = Double.valueOf(args[3]);
 	this.inMemTupleSize = 0;
 	this.isFirstTuple = true;
     }
@@ -140,7 +142,8 @@ public class PartitionMaxGroup extends EvalFunc<Tuple> {
 	// can handle vs overall data size (total #rows) and N is the total sample size.
 	// This equation is taken from mr-cube paper page #6.
 	int partitionFactor = 0;
-	long heapMemAvail = bytesPerReducer;
+	//long heapMemAvail = (long) (bytesPerReducer * percentMemUsage);
+	long heapMemAvail = 1000;
 	long estTotalRows = overallDataSize / actualTupleSize;
 	if (inMemTupleSize == 0) {
 	    inMemTupleSize = getTupleSize(in);

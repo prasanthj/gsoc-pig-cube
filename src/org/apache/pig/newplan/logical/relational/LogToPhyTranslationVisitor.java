@@ -1278,11 +1278,14 @@ public class LogToPhyTranslationVisitor extends LogicalRelationalNodesVisitor {
 	}
     }
 
+    @Override
     public void visit(LOCube loCube) throws FrontendException {
-	// TODO for time being set this flag
 	boolean isHolistic = false;
+	boolean isCountDistinct = false;
+	boolean isTopK = false;
 	String scope = DEFAULT_SCOPE;
-	POCube poCube = new POCube(new OperatorKey(scope, nodeGen.getNextNodeId(scope)), loCube.getRequestedParallelism());
+	POCube poCube = new POCube(new OperatorKey(scope, nodeGen.getNextNodeId(scope)),
+	        loCube.getRequestedParallelism());
 	poCube.addOriginalLocation(loCube.getAlias(), loCube.getLocation());
 	poCube.setResultType(DataType.TUPLE);
 	currentPlan.add(poCube);
@@ -1295,19 +1298,29 @@ public class LogToPhyTranslationVisitor extends LogicalRelationalNodesVisitor {
 	// to perform mr-cube
 	if (isHolistic != true) {
 	    isHolistic = detectTopK(loCube);
+	    if (isHolistic == true) {
+		isTopK = true;
+	    }
+	} else {
+	    isCountDistinct = true;
 	}
 
 	if (isHolistic) {
-	    // TODO rewrite plan if the measure is holistic
 	    poCube.setHolistic(isHolistic);
 	    if (loCube.getAlgebraicAttr() != null) {
 		poCube.setAlgebraicAttr(loCube.getAlgebraicAttr());
 	    } else {
-		// TODO throw error since holistic measure need algebraic
-		// attribute
+		// FIXME what to do if algebraic attribute cannot be determined automatically?
+		// Provide support for user hinting the algebraic attribute.
 	    }
 	    List<Tuple> lattice = computeOverallCubeLattice(loCube.getOperations(), loCube.getDimensions());
 	    poCube.setCubeLattice(lattice);
+	}
+
+	if (isCountDistinct == true) {
+	    poCube.setHolisticMeasure(POCube.HOLISTIC_COUNT_DISTINCT);
+	} else if (isTopK == true) {
+	    poCube.setHolisticMeasure(POCube.HOLISTIC_TOPK);
 	}
 
 	PhysicalOperator from = logToPhyMap.get(op);
@@ -1320,9 +1333,10 @@ public class LogToPhyTranslationVisitor extends LogicalRelationalNodesVisitor {
 	}
     }
 
-    // TODO is there a better way to do this?
-    private List<Tuple> computeOverallCubeLattice(List<String> operations, MultiMap<Integer, String> dimensions) throws LogicalToPhysicalTranslatorException {
-
+    // This method computes the overall combined cube lattice. The lattice generated from independent CUBE/ROLLUP
+    // clauses will be combined together.
+    private List<Tuple> computeOverallCubeLattice(List<String> operations, MultiMap<Integer, String> dimensions)
+	    throws LogicalToPhysicalTranslatorException {
 	List<Tuple> result = new ArrayList<Tuple>();
 	CubeDimensions cd = new CubeDimensions();
 	RollupDimensions rd = new RollupDimensions();
@@ -1341,7 +1355,6 @@ public class LogToPhyTranslationVisitor extends LogicalRelationalNodesVisitor {
 		String msg = "Failed to generate Cube Lattice";
 		throw new LogicalToPhysicalTranslatorException(msg, errCode, PigException.BUG, e);
 	    }
-
 	    combineLattices(result, temp);
 	}
 	return result;
@@ -1371,12 +1384,9 @@ public class LogToPhyTranslationVisitor extends LogicalRelationalNodesVisitor {
 	return result;
     }
 
-    // as an optimization algebraic attribute finding is also added to this
-    // function
-    // this function will also try to determine the algebraic attribute if
-    // LOCube.algebraicAttr
-    // is null.
-    // TODO throw error if algebraic attribute could not be determined
+    // This method scans the entire plan to determine if COUNT + DISTINCT combination
+    // of measure occurs.
+    // As an optimization algebraic attribute finding is also added to this function.
     private boolean detectCountDistinct(LOCube loCube) throws FrontendException {
 	boolean isHolistic = false;
 	Operator succ = null;
@@ -1389,9 +1399,7 @@ public class LogToPhyTranslationVisitor extends LogicalRelationalNodesVisitor {
 	    // we do not need to execute this function
 	    return false;
 	}
-	// TODO fix description
-	// determine if the measure is holistic
-	// TOP-K + COUNT/COUNT_STAR is holistic
+
 	while (succ != null) {
 	    if (succ instanceof LOForEach) {
 		LogicalPlan innerplan = ((LOForEach) succ).getInnerPlan();
@@ -1401,7 +1409,7 @@ public class LogToPhyTranslationVisitor extends LogicalRelationalNodesVisitor {
 		while (iter.hasNext()) {
 		    Operator sink = iter.next();
 		    if (sink instanceof LOGenerate) {
-			// get userfunc expression and check if COUNT is used
+			// get userfunc expression and check if COUNT/COUNT_STAR is used
 			// if so then get the alias passed to COUNT and see if
 			// it belongs to distinct operator
 			List<LogicalExpressionPlan> oplans = ((LOGenerate) sink).getOutputPlans();
@@ -1409,34 +1417,34 @@ public class LogToPhyTranslationVisitor extends LogicalRelationalNodesVisitor {
 			    List<Operator> sources = oplans.get(i).getSources();
 			    for (Operator source : sources) {
 				if (source instanceof UserFuncExpression) {
-				    if (((UserFuncExpression) source).getFuncSpec().getClassName().equals("org.apache.pig.builtin.COUNT") == true ||
-					    ((UserFuncExpression) source).getFuncSpec().getClassName().equals("org.apache.pig.builtin.COUNT_STAR") == true) {
+				    if (((UserFuncExpression) source).getFuncSpec().getClassName()
+					    .equals("org.apache.pig.builtin.COUNT") == true
+					    || ((UserFuncExpression) source).getFuncSpec().getClassName()
+					            .equals("org.apache.pig.builtin.COUNT_STAR") == true) {
 					Operator ufsink = source.getPlan().getSinks().get(0);
 					try {
 					    countalias = ((ProjectExpression) ufsink).getFieldSchema().alias;
 
-					    // if LODistinct operator appeared
-					    // before LOGenerate while iterating
-					    // then
-					    // distalias would not be null
+					    // if LODistinct operator appeared before LOGenerate while iterating
+					    // then distalias would not be null
 					    if (distalias != null) {
 						if (countalias.equals(distalias) == true) {
 						    isHolistic = true;
 						}
 					    }
 					} catch (ClassCastException e) {
-					    int errCode = 2011;
+					    int errCode = 2167;
 					    String msg = "Invalid LogicalExpression inside UDF";
-					    throw new LogicalToPhysicalTranslatorException(msg, errCode, PigException.BUG, e);
+					    throw new LogicalToPhysicalTranslatorException(msg, errCode,
+						    PigException.BUG, e);
 					}
 				    }
 				}
 			    }
 			}
 		    } else if (sink instanceof LODistinct) {
-			// LODistinct operator came before LOGenerate while
-			// iterating or UserFuncExpr doesn't contain COUNT as
-			// UDF
+			// This happens if LODistinct operator came before LOGenerate
+			// or if UserFuncExpr doesn't contain COUNT as UDF
 			if (countalias == null) {
 			    distalias = ((LODistinct) sink).alias;
 			} else {
@@ -1448,20 +1456,13 @@ public class LogToPhyTranslationVisitor extends LogicalRelationalNodesVisitor {
 			if (loCube.getAlgebraicAttr() == null) {
 			    String algAttr = null;
 			    algAttr = findAlgebraicAttribute((LODistinct) sink);
-
-			    if (algAttr != null) {
-				loCube.setAlgebraicAttr(algAttr);
-			    } else {
-				// TODO handle error condition here
-			    }
+			    loCube.setAlgebraicAttr(algAttr);
 			}
 
 		    }
 		}
 	    }
 
-	    // TODO do I need to proceed further even after detecting holistic?
-	    // descend down the plan
 	    try {
 		succ = succ.getPlan().getSuccessors(succ).get(0);
 	    } catch (NullPointerException e) {
@@ -1512,7 +1513,7 @@ public class LogToPhyTranslationVisitor extends LogicalRelationalNodesVisitor {
 	return algAttr;
     }
 
-    // TODO add some comments of what this function does
+    // This method checks if the output alias of operator using COUNT is same as the input alias TOP.
     private boolean detectTopK(LOCube loCube) throws FrontendException {
 	boolean isHolistic = false;
 	Operator succ = null;
@@ -1534,23 +1535,21 @@ public class LogToPhyTranslationVisitor extends LogicalRelationalNodesVisitor {
 		while (iter.hasNext()) {
 		    Operator sink = iter.next();
 		    if (sink instanceof LOGenerate) {
-			// get userfunc expression and check if COUNT is used
-			// if so then get the alias passed to COUNT and see if
-			// it belongs to distinct operator
 			List<LogicalExpressionPlan> oplans = ((LOGenerate) sink).getOutputPlans();
 			for (int i = 0; i < oplans.size(); i++) {
 			    List<Operator> sources = oplans.get(i).getSources();
 			    for (Operator source : sources) {
 				if (source instanceof UserFuncExpression) {
-				    if (((UserFuncExpression) source).getFuncSpec().getClassName().equals("org.apache.pig.builtin.COUNT") == true ||
-					    ((UserFuncExpression) source).getFuncSpec().getClassName().equals("org.apache.pig.builtin.COUNT_STAR") == true) {
+				    if (((UserFuncExpression) source).getFuncSpec().getClassName()
+					    .equals("org.apache.pig.builtin.COUNT") == true
+					    || ((UserFuncExpression) source).getFuncSpec().getClassName()
+					            .equals("org.apache.pig.builtin.COUNT_STAR") == true) {
 					countOutAlias = ((LOForEach) succ).alias;
-				    } else if (((UserFuncExpression) source).getFuncSpec().getClassName().equals("org.apache.pig.builtin.TOP") == true) {
+				    } else if (((UserFuncExpression) source).getFuncSpec().getClassName()
+					    .equals("org.apache.pig.builtin.TOP") == true) {
 					List<Operator> exps = source.getPlan().getSinks();
-					// first 2 argument will be
-					// ConstantExpression
-					// last argument will be
-					// ProjectExpression
+					// first 2 argument will be ConstantExpression
+					// last argument will be ProjectExpression
 					for (Operator exp : exps) {
 					    if (exp instanceof ProjectExpression) {
 						topInAlias = ((ProjectExpression) exp).getFieldSchema().alias;
@@ -1564,8 +1563,6 @@ public class LogToPhyTranslationVisitor extends LogicalRelationalNodesVisitor {
 		}
 	    }
 
-	    // TODO do I need to proceed further even after detecting holistic?
-	    // descend down the plan
 	    try {
 		succ = succ.getPlan().getSuccessors(succ).get(0);
 	    } catch (NullPointerException e) {

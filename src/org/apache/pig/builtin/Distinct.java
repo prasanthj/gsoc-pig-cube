@@ -78,7 +78,6 @@ public class Distinct  extends EvalFunc<DataBag> implements Algebraic {
          */
         @Override
         public Tuple exec(Tuple input) throws IOException {
-            log.info("[DISTINCT-Initial] input: " + input);
             // the input has  a single field which is a tuple
             // representing the data we want to distinct. 
             // unwrap, put in a bag and send down
@@ -99,7 +98,6 @@ public class Distinct  extends EvalFunc<DataBag> implements Algebraic {
          */
         @Override
         public Tuple exec(Tuple input) throws IOException {
-            log.info("[DISTINCT-Intermediate] input: " + input);
             return tupleFactory.newTuple(getDistinctFromNestedBags(input, this));
         }
     }
@@ -111,7 +109,6 @@ public class Distinct  extends EvalFunc<DataBag> implements Algebraic {
          */
         @Override
         public DataBag exec(Tuple input) throws IOException {
-            log.info("[DISTINCT-Final] input: " + input);
             return getDistinctFromNestedBags(input, this);
         }
     }

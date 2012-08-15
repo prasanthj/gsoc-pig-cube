@@ -88,6 +88,7 @@ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.util.PlanHelp
 import org.apache.pig.backend.hadoop.executionengine.shims.HadoopShims;
 import org.apache.pig.backend.hadoop.executionengine.util.MapRedUtil;
 import org.apache.pig.builtin.CubeDimensions;
+import org.apache.pig.builtin.LongSum;
 import org.apache.pig.builtin.RANDOM;
 import org.apache.pig.builtin.RollupDimensions;
 import org.apache.pig.data.DataType;
@@ -1097,13 +1098,125 @@ public class MRCompiler extends PhyPlanVisitor {
                     processUDFs(plan);
                 }
             phyToMROpMap.put(op, curMROp);
+            
+	    // This is required for holistic cubing. The post aggregation step that aggregates the output
+	    // of full cube job is appended here.
+	    List<PhysicalOperator> preds = plan.getPredecessors(op);
+	    if (preds != null) {
+		PhysicalOperator pred = preds.get(0);
+		if (pred instanceof POCube) {
+		    // we need all these checks to proceed and append post aggregate UDF correctly
+		    if (((POCube) pred).isPostAggRequired() == true && ((POCube) pred).getHolisticMeasure() != null
+			    && ((POCube) pred).getPostAggLR() != null) {
+			appendPostAggregateCubeJob(op, ((POCube) pred).getNumDimensions(),
+			        ((POCube) pred).getPostAggLR());
+		    }
+		}
+	    }
         }catch(Exception e){
             int errCode = 2034;
             String msg = "Error compiling operator " + op.getClass().getSimpleName();
             throw new MRCompilerException(msg, errCode, PigException.BUG, e);
         }
     }
-    
+
+    // This job appends the post aggregation UDFs corresponding to the measure. Refer visitCube function
+    // for more details of why this is required.
+    private void appendPostAggregateCubeJob(POForEach op, int totalDimensions, PhysicalOperator lrForPostAgg)
+	    throws PlanException {
+	try {
+	    // MRJOB-3 requires the requested parallelism. Since this is the third job in cubing
+	    // we need to make sure the requested parallelism of the current operator (POForEach)
+	    // is used for the job.
+	    curMROp.requestedParallelism = op.getRequestedParallelism();
+
+	    // Use the LR that was saved earlier containing projections of all dimensions
+	    // The LR and GR are required to group the dimensions and aggregate the
+	    // results from different bins to form the final result
+	    lrForPostAgg.visit(this);
+
+	    // create POGlobalRearrange
+	    POGlobalRearrange gr = new POGlobalRearrange(new OperatorKey(scope, nig.getNextNodeId(scope)));
+	    gr.setResultType(DataType.TUPLE);
+	    gr.visit(this);
+
+	    // create POPackage
+	    POPackage pkg = new POPackage(new OperatorKey(scope, nig.getNextNodeId(scope)));
+	    pkg.setKeyType(DataType.TUPLE);
+	    pkg.setResultType(DataType.TUPLE);
+	    pkg.setNumInps(1);
+	    boolean[] inner = { false };
+	    pkg.setInner(inner);
+	    pkg.visit(this);
+
+	    List<PhysicalPlan> innerPlans = new ArrayList<PhysicalPlan>();
+	    List<Boolean> iFlat = new ArrayList<Boolean>();
+	    // this idx is used to project the column containing measure values
+	    int idx = totalDimensions;
+
+	    List<PhysicalPlan> iPlans = op.getInputPlans();
+
+	    // depending on the measure we need to use different UDFs to get the final result
+	    // For Example: Consider the region in cube lattice <state,>. Following are the
+	    // output from the full cube job. The 3rd field being the COUNT(DISTINCT userid)
+	    // measure value.
+	    // <OH,,2>, <OH,,4> <OH,,3>
+	    // To get the final result <OH,,9> we need to group these tuples and perform SUM.
+	    for (PhysicalPlan iPlan : iPlans) {
+		List<PhysicalOperator> inputs = iPlan.getLeaves();
+		for (PhysicalOperator input : inputs) {
+		    if (input instanceof POUserFunc) {
+			if (((POUserFunc) input).getFuncSpec().getClassName().equals("org.apache.pig.builtin.COUNT") == true
+			        || ((POUserFunc) input).getFuncSpec().getClassName()
+			                .equals("org.apache.pig.builtin.COUNT_STAR") == true) {
+			    PhysicalPlan ufPlan = new PhysicalPlan();
+			    POUserFunc uf = new POUserFunc(new OperatorKey(scope, nig.getNextNodeId(scope)), -1, null,
+				    new FuncSpec(LongSum.class.getName()));
+			    uf.setResultType(DataType.LONG);
+			    ufPlan.add(uf);
+
+			    POProject bagProj = new POProject(new OperatorKey(scope, nig.getNextNodeId(scope)));
+			    bagProj.setResultType(DataType.BAG);
+			    bagProj.setColumn(1);
+			    POProject colProj = new POProject(new OperatorKey(scope, nig.getNextNodeId(scope)));
+			    colProj.setResultType(DataType.BAG);
+			    colProj.setColumn(idx);
+			    idx++;
+
+			    ufPlan.add(bagProj);
+			    ufPlan.add(colProj);
+			    ufPlan.connect(bagProj, colProj);
+			    ufPlan.connect(colProj, uf);
+			    innerPlans.add(ufPlan);
+			    iFlat.add(false);
+			} else {
+			    // FIXME: What PostAggregate UDFs should be used for other measures?
+			    // Currently focussing only on COUNT + DISTINCT
+			}
+		    } else {
+			if (input instanceof POProject) {
+			    PhysicalPlan projPlan = new PhysicalPlan();
+			    POProject proj = new POProject(new OperatorKey(scope, nig.getNextNodeId(scope)));
+			    proj.setColumn(0);
+			    projPlan.add(proj);
+			    innerPlans.add(projPlan);
+			    iFlat.add(true);
+			}
+		    }
+		}
+	    }
+
+	    POForEach foreachSum = new POForEach(new OperatorKey(scope, nig.getNextNodeId(scope)), 
+		    -1, innerPlans, iFlat);
+	    foreachSum.setResultType(DataType.BAG);
+	    foreachSum.visit(this);
+	} catch (VisitorException e) {
+	    throw new PlanException(e);
+	} catch (IOException e) {
+	    throw new PlanException(e);
+	}
+    }
+
     @Override
     public void visitGlobalRearrange(POGlobalRearrange op) throws VisitorException{
         try{
@@ -1812,18 +1925,15 @@ public class MRCompiler extends PhyPlanVisitor {
 	// we can just illustrate using the naive approach
 	if (op.isHolistic() == true && !pigContext.inIllustrator) {
 	    try {
-		// cube lattice should be generated while building logical plan itself
-		if (op.getCubeLattice() == null) {
-		    int errCode = 2167;
-		    String msg = "Measure is holistic but Cube Lattice is null";
-		    throw new PlanException(msg, errCode, PigException.BUG);
-		}
-
+		// save the so far compiled mrjob. After inserting the new sample job
+		// the old job will continue compiling other operators
 		MapReduceOper prevJob = compiledInputs[0];
 
+		// the output of sample job i.e region label and corresponding
+		// value partitions will be saved to this file
 		FileSpec sampleJobOutput = getTempFileSpec();
-		double sampleSize = 0.0;
 
+		double sampleSize = 0.0;
 		sampleSize = determineSamplePercentage(op);
 		if (sampleSize == 0.0) {
 		    LOG.info("Input dataset is estimated to be small enough for performing naive cubing.");
@@ -1831,12 +1941,25 @@ public class MRCompiler extends PhyPlanVisitor {
 		    if (op.getAlgebraicAttr() == null) {
 			LOG.warn("[CUBE] Algebraic attribute is null. Falling back to naive cubing.");
 		    } else {
-			curMROp = getCubeSampleJob(op, prevJob, sampleSize, sampleJobOutput);
+			// If the measure is found to be holistic then to get to the final results
+			// we need the following MRJobs
+			// MRJOB-1: Sample naive cube job - to determine the value partition for large groups
+			// MRJOB-2: Actual full cube job - based on output of MRJOB-1 it performs cubing
+			// and partitions the large groups to their corresponding bins
+			// MRJOB-3: Post aggregation job - Aggregates output of MRJOB-2 to produce final results
 
+			// post aggregation job need information about the number of dimensions.
+			// so storing it with POCube operator for later use by post aggregation job
+			int[] totalDimensions = new int[1];
+			curMROp = getCubeSampleJob(op, sampleSize, sampleJobOutput, totalDimensions);
+			op.setNumDimensions(totalDimensions[0]);
+
+			// manually connect the sample job with the previous job. This cannot be automatically done
+			// because the output of sample job is not the input of next job
 			MRPlan.add(curMROp);
 			MRPlan.connect(curMROp, prevJob);
 
-			// continue compilation of original plan sequence
+			// sample job is inserted now. resetting back to original compilation sequence
 			curMROp = prevJob;
 
 			// setting up the result of sample job (which is the annotated lattice)
@@ -1844,28 +1967,43 @@ public class MRCompiler extends PhyPlanVisitor {
 			// to all mappers running the actual full cube materialization job
 			curMROp.setAnnotatedLatticeFile(sampleJobOutput.getFileName());
 			curMROp.setFullCubeJob(true);
+
+			// since the requested parallelism was adjusted to 1 in sample job
+			// we need to reset the requested parallelism back to the original value
+			// MRJOB-1 requires the parallelism to be 1. MRJOB-2 and MRJOB-3 requires
+			// the parallelism as requested by the user.
 			curMROp.requestedParallelism = op.getRequestedParallelism();
 
+			// The original plan sequence contains CubeDimensions/RollupDimensions UDF. This
+			// cannot be used anymore. So replace it with HolisticCube UDF
 			byte algAttrType = modifyCubeUDFsForHolisticMeasure(op, sampleJobOutput.getFileName());
 			compiledInputs[0] = curMROp;
 
-			addAlgAttrColToLR(op, algAttrType);
-
+			// add the column that contains the bin number for large groups to local rearrange.
+			// the bin numbers for large groups are calculated by algebraicAttribute%partitionFactor.
+			// save this LR in POCube as it will be required during post aggregation job.
+			PhysicalOperator lrForPostAgg = addAlgAttrColToLR(op, algAttrType);
+			op.setPostAggLR(lrForPostAgg);
 			curMROp.setMapDone(true);
-			curMROp.setReduceDone(false);
 
-			// value partition output should be stored
-			// before post processing
+			// we are just storing the output of mapper. Reducer doesn't do anything.
 			FileSpec vpOutput = getTempFileSpec();
 			endSingleInputPlanWithStr(vpOutput);
 
-			// post process job
-			MapReduceOper ppMro = startNew(vpOutput, curMROp);
-			curMROp = ppMro;
-			curMROp.setFullCubeJob(false);
-
-			insertPostProcessJob(ppMro, op, vpOutput);
+			// This is the final post aggregation job
+			MapReduceOper paOp = startNew(vpOutput, prevJob);
+			curMROp = paOp;
+			curMROp.setMapDone(false);
 			compiledInputs[0] = curMROp;
+			insertPostProcessUDF(op);
+			// This is the end of full cube job
+
+			// Post aggregation of output is required to get the correct aggregated result.
+			// We cannot insert the post aggregate job here because we have not visited the
+			// foreach that contains measure yet. While visiting the POForEach that contains
+			// holistic measure then we will append the post aggregation steps.
+			// See visitPOForEach for the conditional check that inserts post aggregation step.
+			op.setPostAggRequired(true);
 		    }
 		}
 	    } catch (PlanException e) {
@@ -1880,11 +2018,17 @@ public class MRCompiler extends PhyPlanVisitor {
 	}
     }
 
-    // This function adds the algebraic attribute column in dimensional list
-    // which now contains algebraicAttribute%partitionFactor value to LocalRearrange
-    private void addAlgAttrColToLR(POCube op, byte algAttrType) throws PlanException {
+    // This function adds the algebraic attribute column to dimensions list
+    // which now contains algebraicAttribute%partitionFactor value
+    private PhysicalOperator addAlgAttrColToLR(POCube op, byte algAttrType) throws PlanException {
 	PhysicalPlan mapPlan = curMROp.mapPlan;
 	PhysicalOperator succ = (PhysicalOperator) mapPlan.getLeaves().get(0);
+	PhysicalOperator cloneLR;
+	try {
+	    cloneLR = succ.clone();
+	} catch (CloneNotSupportedException e) {
+	    throw new PlanException(e);
+	}
 	if (succ instanceof POLocalRearrange) {
 	    List<PhysicalPlan> inps = ((POLocalRearrange) succ).getPlans();
 	    PhysicalPlan pplan = new PhysicalPlan();
@@ -1895,6 +2039,7 @@ public class MRCompiler extends PhyPlanVisitor {
 	    inps.add(pplan);
 	    ((POLocalRearrange) succ).setPlans(inps);
 	}
+	return cloneLR;
     }
 
     // This function determines the sampling percentage based on the estimated
@@ -1932,7 +2077,7 @@ public class MRCompiler extends PhyPlanVisitor {
 		    // for #rows between 2M to 2B, 100K tuples are sufficient
 		    sampleSize = (double) 100000 / (double) estTotalRows;
 		} else {
-		    sampleSize = 0.0;
+		    sampleSize = 0.5;
 		}
 	    }
 	}
@@ -1943,7 +2088,7 @@ public class MRCompiler extends PhyPlanVisitor {
     // This method modifies the map plan containing CubeDimensions/RollupDimensions and replaces
     // it will HolisticCube UDF.
     // FIXME Try if this works for query containing two cube operators.
-    private byte modifyCubeUDFsForHolisticMeasure(POCube op, String annotatedLatticeFile) throws IOException {
+    private byte modifyCubeUDFsForHolisticMeasure(POCube op, String annotatedLatticeFile) throws PlanException {
 	byte algAttrType = DataType.BYTEARRAY;
 	PhysicalPlan mapPlan = curMROp.mapPlan;
 	Map<OperatorKey, PhysicalOperator> poMap = mapPlan.getKeys();
@@ -2091,12 +2236,8 @@ public class MRCompiler extends PhyPlanVisitor {
 	return algAttrType;
     }
 
-    // This function inserts final post processing job. The PostProcessCube UDF essentially strips off
-    // algebraicAttribute%partitionFactor value from the output
-    private void insertPostProcessJob(MapReduceOper ppMro, POCube op, FileSpec vpOutput) throws VisitorException,
-	    PlanException {
-	PhysicalPlan mapPlan = curMROp.mapPlan;
-
+    // This function inserts PostProcessCube UDF to the reduce plan of the full cube job.
+    private void insertPostProcessUDF(POCube op) throws PlanException {
 	List<PhysicalPlan> feIPlans = new ArrayList<PhysicalPlan>();
 	List<Boolean> feFlat = new ArrayList<Boolean>();
 	POForEach foreach = null;
@@ -2116,7 +2257,11 @@ public class MRCompiler extends PhyPlanVisitor {
 
 	foreach = new POForEach(new OperatorKey(scope, nig.getNextNodeId(scope)), -1, feIPlans, feFlat);
 	foreach.setResultType(DataType.BAG);
-	mapPlan.addAsLeaf(foreach);
+	try {
+	    foreach.visit(this);
+	} catch (VisitorException e) {
+	    throw new PlanException(e);
+	}
     }
 
     // This method modifies the current mr-plan to insert a new sampling job.
@@ -2129,7 +2274,7 @@ public class MRCompiler extends PhyPlanVisitor {
     // 5) POLocalRearrange
     // 6) POGlobalRearrange
     // 7) Finally attaches a reduce plan
-    private MapReduceOper getCubeSampleJob(POCube op, MapReduceOper prevJob, double sampleSize, FileSpec sampleJobOutput)
+    private MapReduceOper getCubeSampleJob(POCube op, double sampleSize, FileSpec sampleJobOutput, int[] totalDimensions)
 	    throws VisitorException {
 	try {
 	    PhysicalOperator opRoot = null;
@@ -2201,6 +2346,8 @@ public class MRCompiler extends PhyPlanVisitor {
 			}
 		    }
 		}
+
+		totalDimensions[0] = dimOperators.size();
 	    }
 
 	    // Filter plan replicating the SAMPLE operator
@@ -2299,13 +2446,7 @@ public class MRCompiler extends PhyPlanVisitor {
 	    // create local rearrange
 	    POLocalRearrange lr = new POLocalRearrange(new OperatorKey(scope, nig.getNextNodeId(scope)));
 	    lr.setKeyType(DataType.TUPLE);
-	    try {
-		lr.setIndex(0);
-	    } catch (ExecException e) {
-		int errCode = 2058;
-		String msg = "Unable to set index on newly created POLocalRearrange.";
-		throw new PlanException(msg, errCode, PigException.BUG, e);
-	    }
+	    lr.setIndex(0);
 	    lr.setPlans(lrPlans);
 	    lr.setResultType(DataType.TUPLE);
 	    lr.visit(this);
@@ -2397,11 +2538,15 @@ public class MRCompiler extends PhyPlanVisitor {
 	    inpPlans.add(projPlan);
 	    flat.add(false);
 
+	    // Reuse the property used by skewedjoin for getting the percentage usage of memory
+	    String percentMemUsage = pigContext.getProperties().getProperty("pig.skewedjoin.reduce.memusage",
+		    String.valueOf(PartitionSkewedKeys.DEFAULT_PERCENT_MEMUSAGE));
 	    PhysicalPlan ufPlan = new PhysicalPlan();
-	    String[] ufArgs = new String[3];
+	    String[] ufArgs = new String[4];
 	    ufArgs[0] = String.valueOf(overallDataSize);
 	    ufArgs[1] = String.valueOf(getBytesPerReducer());
 	    ufArgs[2] = String.valueOf(actualTupleSize);
+	    ufArgs[3] = String.valueOf(percentMemUsage);
 	    POUserFunc uf = new POUserFunc(new OperatorKey(scope, nig.getNextNodeId(scope)), -1, null, new FuncSpec(
 		    PartitionMaxGroup.class.getName(), ufArgs));
 	    uf.setResultType(DataType.TUPLE);

@@ -79,10 +79,11 @@ public class TestPartitionMaxGroup {
 	in.append(bag);
 
 	Set<Tuple> expected = ImmutableSet.of(TF.newTuple(Lists.newArrayList((int) 20)));
-	String[] ufArgs = new String[3];
+	String[] ufArgs = new String[4];
 	ufArgs[0] = "10000";
 	ufArgs[1] = "1000";
 	ufArgs[2] = "100";
+	ufArgs[3] = "1.0";
 	PartitionMaxGroup mgs = new PartitionMaxGroup(ufArgs);
 	Tuple result = mgs.exec(in);
 

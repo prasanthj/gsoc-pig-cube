@@ -31,9 +31,9 @@ import org.apache.pig.data.TupleFactory;
 
 /**
  * This UDF is used by Cube operator for holistic cubing.
- * It strips off the reducer number value that is inserted
+ * It strips off the bin number value that is inserted
  * into each tuples. The map job of full holistic cube job
- * appends algebraicAttribute%partitionFactor to the end of
+ * appends bin number (algebraicAttribute%partitionFactor) to the end of
  * key and to the end of dimensional list inside values. This
  * value is inserted by the map job to make sure algebraic attributes
  * with same values goes to the same reducer.
@@ -49,6 +49,10 @@ public class PostProcessCube extends EvalFunc<Tuple> {
     private TupleFactory tf;
     private BagFactory bf;
 
+    // for debugging
+    boolean printOutputOnce = false;
+    boolean printInputOnce = false;
+
     public PostProcessCube() {
 	this.tf = TupleFactory.getInstance();
 	this.bf = BagFactory.getInstance();
@@ -60,6 +64,10 @@ public class PostProcessCube extends EvalFunc<Tuple> {
      * @return tuple with algebraicAttribute%patitionFactor value stripped off
      */
     public Tuple exec(Tuple in) throws IOException {
+	if (printInputOnce == false) {
+	    log.info("[CUBE] Input group: " + in.get(0) + " Bag size: " + ((DataBag)in.get(1)).size());
+	    printInputOnce = true;
+	}
 
 	Tuple keyTuple = (Tuple) in.get(0);
 
@@ -90,6 +98,10 @@ public class PostProcessCube extends EvalFunc<Tuple> {
 	}
 	in.set(1, bf.newDefaultBag(resultBag));
 
+	if (printOutputOnce == false) {
+	    log.info("[CUBE] Output group: " + in.get(0));
+	    printOutputOnce = true;
+	}
 	return in;
     }
 
