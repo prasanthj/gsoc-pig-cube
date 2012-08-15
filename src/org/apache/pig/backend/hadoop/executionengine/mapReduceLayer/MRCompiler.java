@@ -2077,7 +2077,7 @@ public class MRCompiler extends PhyPlanVisitor {
 		    // for #rows between 2M to 2B, 100K tuples are sufficient
 		    sampleSize = (double) 100000 / (double) estTotalRows;
 		} else {
-		    sampleSize = 0.5;
+		    sampleSize = 0.0;
 		}
 	    }
 	}
