@@ -1311,7 +1311,7 @@ public class LogToPhyTranslationVisitor extends LogicalRelationalNodesVisitor {
 		poCube.setAlgebraicAttr(loCube.getAlgebraicAttr());
 	    } else {
 		// FIXME what to do if algebraic attribute cannot be determined automatically?
-		// Provide support for user hinting the algebraic attribute.
+		// TODO Need to provide support for user hinting the algebraic attribute.
 	    }
 	    List<Tuple> lattice = computeOverallCubeLattice(loCube.getOperations(), loCube.getDimensions());
 	    poCube.setCubeLattice(lattice);
