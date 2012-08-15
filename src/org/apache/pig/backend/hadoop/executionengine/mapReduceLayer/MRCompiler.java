@@ -1108,8 +1108,14 @@ public class MRCompiler extends PhyPlanVisitor {
 		    // we need all these checks to proceed and append post aggregate UDF correctly
 		    if (((POCube) pred).isPostAggRequired() == true && ((POCube) pred).getHolisticMeasure() != null
 			    && ((POCube) pred).getPostAggLR() != null) {
+			// This is the final post aggregation job
+			FileSpec vpOutput = getTempFileSpec();
+			endSingleInputPlanWithStr(vpOutput);
+			curMROp = startNew(vpOutput, curMROp);
+			compiledInputs[0] = curMROp;
 			appendPostAggregateCubeJob(op, ((POCube) pred).getNumDimensions(),
 			        ((POCube) pred).getPostAggLR());
+
 		    }
 		}
 	    }
@@ -1129,6 +1135,21 @@ public class MRCompiler extends PhyPlanVisitor {
 	    // we need to make sure the requested parallelism of the current operator (POForEach)
 	    // is used for the job.
 	    curMROp.requestedParallelism = op.getRequestedParallelism();
+
+	    List<PhysicalPlan> feIPlans = new ArrayList<PhysicalPlan>();
+	    List<Boolean> feFlat = new ArrayList<Boolean>();
+	    POForEach foreach = null;
+
+	    PhysicalPlan fPlan = new PhysicalPlan();
+	    POProject projStar = new POProject(new OperatorKey(scope, nig.getNextNodeId(scope)));
+	    projStar.setStar(true);
+	    fPlan.add(projStar);
+	    feIPlans.add(fPlan);
+	    feFlat.add(false);
+
+	    foreach = new POForEach(new OperatorKey(scope, nig.getNextNodeId(scope)), -1, feIPlans, feFlat);
+	    foreach.setResultType(DataType.BAG);
+	    foreach.visit(this);
 
 	    // Use the LR that was saved earlier containing projections of all dimensions
 	    // The LR and GR are required to group the dimensions and aggregate the
@@ -1206,10 +1227,11 @@ public class MRCompiler extends PhyPlanVisitor {
 		}
 	    }
 
-	    POForEach foreachSum = new POForEach(new OperatorKey(scope, nig.getNextNodeId(scope)), 
-		    -1, innerPlans, iFlat);
+	    POForEach foreachSum = new POForEach(new OperatorKey(scope, nig.getNextNodeId(scope)), -1, innerPlans,
+		    iFlat);
 	    foreachSum.setResultType(DataType.BAG);
 	    foreachSum.visit(this);
+
 	} catch (VisitorException e) {
 	    throw new PlanException(e);
 	} catch (IOException e) {
@@ -1945,7 +1967,7 @@ public class MRCompiler extends PhyPlanVisitor {
 			// we need the following MRJobs
 			// MRJOB-1: Sample naive cube job - to determine the value partition for large groups
 			// MRJOB-2: Actual full cube job - based on output of MRJOB-1 it performs cubing
-			// and partitions the large groups to their corresponding bins
+			// and partitions the large groups to their corresponding bins and executes the measure
 			// MRJOB-3: Post aggregation job - Aggregates output of MRJOB-2 to produce final results
 
 			// post aggregation job need information about the number of dimensions.
@@ -1979,24 +2001,14 @@ public class MRCompiler extends PhyPlanVisitor {
 			byte algAttrType = modifyCubeUDFsForHolisticMeasure(op, sampleJobOutput.getFileName());
 			compiledInputs[0] = curMROp;
 
-			// add the column that contains the bin number for large groups to local rearrange.
+			// add the column that contains the bin number to local rearrange.
 			// the bin numbers for large groups are calculated by algebraicAttribute%partitionFactor.
 			// save this LR in POCube as it will be required during post aggregation job.
 			PhysicalOperator lrForPostAgg = addAlgAttrColToLR(op, algAttrType);
 			op.setPostAggLR(lrForPostAgg);
 			curMROp.setMapDone(true);
 
-			// we are just storing the output of mapper. Reducer doesn't do anything.
-			FileSpec vpOutput = getTempFileSpec();
-			endSingleInputPlanWithStr(vpOutput);
-
-			// This is the final post aggregation job
-			MapReduceOper paOp = startNew(vpOutput, prevJob);
-			curMROp = paOp;
-			curMROp.setMapDone(false);
-			compiledInputs[0] = curMROp;
 			insertPostProcessUDF(op);
-			// This is the end of full cube job
 
 			// Post aggregation of output is required to get the correct aggregated result.
 			// We cannot insert the post aggregate job here because we have not visited the
@@ -2237,6 +2249,7 @@ public class MRCompiler extends PhyPlanVisitor {
     }
 
     // This function inserts PostProcessCube UDF to the reduce plan of the full cube job.
+    // The PostProcessCube UDF just strips off the bin numbers from key and values
     private void insertPostProcessUDF(POCube op) throws PlanException {
 	List<PhysicalPlan> feIPlans = new ArrayList<PhysicalPlan>();
 	List<Boolean> feFlat = new ArrayList<Boolean>();
