@@ -2295,6 +2295,8 @@ public class MRCompiler extends PhyPlanVisitor {
 
 	    MapReduceOper mro = getMROp();
 	    curMROp = mro;
+	    // For sample job we need just one reducer to store annotated lattice
+	    curMROp.requestedParallelism = 1;
 	    curMROp.setMapDone(false);
 	    compiledInputs[0] = curMROp;
 	    long inputFileSize = 0;
