@@ -78,7 +78,6 @@ public class LOCube extends LogicalRelationalOperator {
     private MultiMap<Integer, LogicalExpressionPlan> mExpressionPlans;
     private List<String> operations;
     private MultiMap<Integer, String> dimensions;
-    private LogicalPlan innerPlan;
     private String algebraicAttr;
     private int algebraicAttrCol;
 
@@ -146,14 +145,6 @@ public class LOCube extends LogicalRelationalOperator {
 
     public List<Operator> getInputs(LogicalPlan plan) {
 	return plan.getPredecessors(this);
-    }
-
-    public void setInnerPlan(LogicalPlan innerPlan) {
-	this.innerPlan = innerPlan;
-    }
-
-    public LogicalPlan getInnerPlan() {
-	return innerPlan;
     }
 
     public String getAlgebraicAttr() {

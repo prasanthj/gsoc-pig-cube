@@ -788,24 +788,24 @@ public class JobControlCompiler{
     }
 
     // Used by full holistic cubing job for estimating the reducers required
-    private int estimateParallelismForCubeJob(Configuration conf, MapReduceOper mro) {
-        String latticeFile = mro.getAnnotatedLatticeFile();
-        int totalEstReducers = 0;
-        if (latticeFile.isEmpty()) {
-            throw new RuntimeException("Internal error: missing annotate lattice file property.");
-        }
-
-        try {
-            List<String> lattice = MapRedUtil.loadAnnotatedLatticeFromHDFS(latticeFile, conf);
-            String[] tokens = lattice.get(0).split(",");
-            // The first tuple will have the max partition value as last field
-            totalEstReducers = Integer.valueOf(tokens[tokens.length - 1]);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-
-        return totalEstReducers;
-    }
+//    private int estimateParallelismForCubeJob(Configuration conf, MapReduceOper mro) {
+//        String latticeFile = mro.getAnnotatedLatticeFile();
+//        int totalEstReducers = 0;
+//        if (latticeFile.isEmpty()) {
+//            throw new RuntimeException("Internal error: missing annotate lattice file property.");
+//        }
+//
+//        try {
+//            List<String> lattice = MapRedUtil.loadAnnotatedLatticeFromHDFS(latticeFile, conf);
+//            String[] tokens = lattice.get(0).split(",");
+//            // The first tuple will have the max partition value as last field
+//            totalEstReducers = Integer.valueOf(tokens[tokens.length - 1]);
+//        } catch (Exception e) {
+//            throw new RuntimeException(e);
+//        }
+//
+//        return totalEstReducers;
+//    }
 
     /**
      * Adjust the number of reducers based on the default_parallel, requested parallel and estimated

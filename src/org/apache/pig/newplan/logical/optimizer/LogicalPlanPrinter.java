@@ -174,7 +174,7 @@ public class LogicalPlanPrinter extends PlanVisitor {
             sb.append(planString(((LOForEach)node).getInnerPlan()));        
         }
         else if (node instanceof LOCube) {
-	    sb.append(planString(((LOCube) node).getInnerPlan()));
+	    sb.append(planString(null));
 	}
         else if(node instanceof LOCogroup){
             MultiMap<Integer, LogicalExpressionPlan> plans = ((LOCogroup)node).getExpressionPlans();
