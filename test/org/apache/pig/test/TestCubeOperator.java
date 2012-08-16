@@ -31,13 +31,19 @@ import java.util.Set;
 import junit.framework.Assert;
 
 import org.apache.pig.PigServer;
+import org.apache.pig.backend.hadoop.executionengine.physicalLayer.PhysicalOperator;
+import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PhysicalPlan;
+import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POCube;
 import org.apache.pig.builtin.mock.Storage.Data;
 import org.apache.pig.data.DataBag;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.data.TupleFactory;
 import org.apache.pig.impl.logicalLayer.FrontendException;
 import org.apache.pig.impl.logicalLayer.schema.Schema;
+import org.apache.pig.impl.plan.OperatorKey;
 import org.apache.pig.newplan.Operator;
+import org.apache.pig.newplan.logical.relational.LogToPhyTranslationVisitor;
+import org.apache.pig.newplan.logical.relational.LogicalPlan;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -599,6 +605,37 @@ public class TestCubeOperator {
     }
 
     @Test
+    public void testExplainHolisticCubeCountDistinct() throws IOException {
+	// test for explain
+	String query = "a = load 'input3' USING mock.Storage() as (a1:chararray,b1:chararray,c1:long); "
+	        + "b = cube a by cube(a1,b1);"
+		+ "c = foreach b {dist = distinct cube.c1; "
+		+ "generate flatten (group), COUNT_STAR(dist);};";
+
+	Util.registerMultiLineQuery(pigServer, query);
+	ByteArrayOutputStream baos = new ByteArrayOutputStream();
+	PrintStream ps = new PrintStream(baos);
+	try {
+	    LogicalPlan lp = buildPlan(query);
+	    PhysicalPlan pp = buildPhysicalPlan(lp);
+	    Map<OperatorKey, PhysicalOperator> kop = pp.getKeys();
+	    for(Map.Entry<OperatorKey, PhysicalOperator> entry : kop.entrySet()) {
+		PhysicalOperator oper = entry.getValue();
+		if( oper instanceof POCube ) {
+		    String measure = ((POCube)oper).getHolisticMeasure();
+		    String algAttr = ((POCube)oper).getAlgebraicAttr();
+		    boolean holistic = ((POCube)oper).isHolistic();
+		    assertTrue("Expected: count_distinct Got: "+ measure,POCube.HOLISTIC_COUNT_DISTINCT.equals(measure));
+		    assertTrue("Expected: c1 Got: "+ algAttr, "c1".equals(algAttr));
+		    assertTrue("Expected: true Got: " + holistic, holistic);
+		}
+	    }
+        } catch (Exception e) {
+	    throw new IOException(e);
+        }
+    }
+    
+    @Test
     public void testDescribe() throws IOException {
 	// test for describe
 	String query = "a = load 'input' USING mock.Storage() as (a1:chararray,b1:chararray,c1:long); "
@@ -611,5 +648,20 @@ public class TestCubeOperator {
 		assertTrue(alias.contains("cube"));
 	    }
 	}
+    }
+    
+    public PhysicalPlan buildPhysicalPlan(LogicalPlan lp) throws FrontendException {
+    	LogToPhyTranslationVisitor visitor = new LogToPhyTranslationVisitor(lp);
+    	visitor.setPigContext(pigServer.getPigContext());
+    	visitor.visit();
+    	return visitor.getPhysicalPlan();
+    }
+    
+    public LogicalPlan buildPlan(String query) throws Exception {
+    	try {
+    		return Util.parse(query, pigServer.getPigContext());
+    	} catch(Throwable t) {
+    		throw new Exception("Catch exception: " + t.toString() );
+    	}
     }
 }

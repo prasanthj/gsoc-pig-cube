@@ -626,7 +626,7 @@ public class LogicalPlanBuilder {
 	try {
 	    buildGenerateOp(loc, (LOForEach) foreach, (LOGenerate) gen, operators, allExprPlan,
 		    flattenFlags, getUserDefinedSchema(allExprPlan));
-	    falias = buildForeachOp(loc, (LOForEach) foreach, "cube", inputAlias, innerPlan);
+	    falias = buildForeachOp(loc, (LOForEach) foreach, LOCube.CUBE_OP.toLowerCase(), inputAlias, innerPlan);
 	} catch (ParserValidationException pve) {
 	    throw new FrontendException(pve);
 	}
@@ -649,7 +649,7 @@ public class LogicalPlanBuilder {
 
 	// build group by operator
 	try {
-	    buildGroupOp(loc, (LOCogroup) groupby, op.getAlias(), inpAliases, exprPlansCopy,
+	    buildGroupOp(loc, (LOCogroup) groupby, null, inpAliases, exprPlansCopy,
 		    GROUPTYPE.REGULAR, innerFlags, null);
 	} catch (ParserValidationException pve) {
 	    throw new FrontendException(pve);
