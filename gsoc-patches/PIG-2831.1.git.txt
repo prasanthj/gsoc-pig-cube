@@ -1,0 +1,3445 @@
+diff --git src/org/apache/pig/backend/hadoop/executionengine/mapReduceLayer/JobControlCompiler.java src/org/apache/pig/backend/hadoop/executionengine/mapReduceLayer/JobControlCompiler.java
+index 8029dec..911698b 100644
+--- src/org/apache/pig/backend/hadoop/executionengine/mapReduceLayer/JobControlCompiler.java
++++ src/org/apache/pig/backend/hadoop/executionengine/mapReduceLayer/JobControlCompiler.java
+@@ -70,6 +70,7 @@ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOpe
+ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POStore;
+ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.util.PlanHelper;
+ import org.apache.pig.backend.hadoop.executionengine.shims.HadoopShims;
++import org.apache.pig.backend.hadoop.executionengine.util.MapRedUtil;
+ import org.apache.pig.data.BagFactory;
+ import org.apache.pig.data.DataType;
+ import org.apache.pig.data.SchemaTupleFrontend;
+@@ -693,6 +694,35 @@ public class JobControlCompiler{
+                 }
+             }
+ 
++	    if (mro.isFullCubeJob()) {
++		String symlink = addSingleFileToDistributedCache(pigContext, conf, mro.getAnnotatedLatticeFile(),
++		        "annotatedlattice");
++		conf.set("pig.annotatedLatticeFile", symlink);
++		// FIXME do we need to set the estimated reducer here? what to do if the estimation is greater than requested?
++		// int urp = mro.getRequestedParallelism();
++		// int erp = estimateParallelismForCubeJob(conf, mro);
++		// if( urp < erp ) {
++		// // set the runtime #reducer of the next job as the #partition
++		// ParallelConstantVisitor visitor =
++		// new ParallelConstantVisitor(mro.reducePlan, erp);
++		// visitor.visit();
++		//
++		// log.info("[CUBE] Requested parallelism ("+urp+") is less than the estimated parallelism ("+erp+"). Setting runtime parallelism to estimated value: "
++		// + erp);
++		//
++		// // set various parallelism into the job conf for later analysis
++		// conf.setInt("pig.info.reducers.default.parallel", pigContext.defaultParallel);
++		// conf.setInt("pig.info.reducers.requested.parallel", mro.requestedParallelism);
++		// conf.setInt("pig.info.reducers.estimated.parallel", mro.estimatedParallelism);
++		//
++		// // this is for backward compatibility, and we encourage to use runtimeParallelism at runtime
++		// mro.requestedParallelism = erp;
++		//
++		// // finally set the number of reducers
++		// conf.setInt("mapred.reduce.tasks", erp);
++		// }
++	    }
++            
+             if (mro.isSkewedJoin()) {
+                 String symlink = addSingleFileToDistributedCache(pigContext,
+                         conf, mro.getSkewedJoinPartitionFile(), "pigdistkey");
+@@ -757,6 +787,26 @@ public class JobControlCompiler{
+         }
+     }
+ 
++    // Used by full holistic cubing job for estimating the reducers required
++//    private int estimateParallelismForCubeJob(Configuration conf, MapReduceOper mro) {
++//        String latticeFile = mro.getAnnotatedLatticeFile();
++//        int totalEstReducers = 0;
++//        if (latticeFile.isEmpty()) {
++//            throw new RuntimeException("Internal error: missing annotate lattice file property.");
++//        }
++//
++//        try {
++//            List<String> lattice = MapRedUtil.loadAnnotatedLatticeFromHDFS(latticeFile, conf);
++//            String[] tokens = lattice.get(0).split(",");
++//            // The first tuple will have the max partition value as last field
++//            totalEstReducers = Integer.valueOf(tokens[tokens.length - 1]);
++//        } catch (Exception e) {
++//            throw new RuntimeException(e);
++//        }
++//
++//        return totalEstReducers;
++//    }
++
+     /**
+      * Adjust the number of reducers based on the default_parallel, requested parallel and estimated
+      * parallel. For sampler jobs, we also adjust the next job in advance to get its runtime parallel as
+diff --git src/org/apache/pig/backend/hadoop/executionengine/mapReduceLayer/MRCompiler.java src/org/apache/pig/backend/hadoop/executionengine/mapReduceLayer/MRCompiler.java
+index 1d05a20..d35cbd1 100644
+--- src/org/apache/pig/backend/hadoop/executionengine/mapReduceLayer/MRCompiler.java
++++ src/org/apache/pig/backend/hadoop/executionengine/mapReduceLayer/MRCompiler.java
+@@ -53,12 +53,15 @@ import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.plans.Scalar
+ import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.plans.UDFFinder;
+ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.PhysicalOperator;
+ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.expressionOperators.ConstantExpression;
++import org.apache.pig.backend.hadoop.executionengine.physicalLayer.expressionOperators.LessThanExpr;
++import org.apache.pig.backend.hadoop.executionengine.physicalLayer.expressionOperators.POCast;
+ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.expressionOperators.POProject;
+ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.expressionOperators.POUserFunc;
+ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PhyPlanVisitor;
+ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PhysicalPlan;
+ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POCollectedGroup;
+ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POCross;
++import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POCube;
+ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.PODistinct;
+ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POFRJoin;
+ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POFilter;
+@@ -84,16 +87,26 @@ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOpe
+ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.util.PlanHelper;
+ import org.apache.pig.backend.hadoop.executionengine.shims.HadoopShims;
+ import org.apache.pig.backend.hadoop.executionengine.util.MapRedUtil;
++import org.apache.pig.builtin.CubeDimensions;
++import org.apache.pig.builtin.LongSum;
++import org.apache.pig.builtin.RANDOM;
++import org.apache.pig.builtin.RollupDimensions;
+ import org.apache.pig.data.DataType;
++import org.apache.pig.data.Tuple;
+ import org.apache.pig.impl.PigContext;
+ import org.apache.pig.impl.builtin.DefaultIndexableLoader;
+ import org.apache.pig.impl.builtin.FindQuantiles;
+ import org.apache.pig.impl.builtin.GetMemNumRows;
++import org.apache.pig.impl.builtin.HolisticCube;
++import org.apache.pig.impl.builtin.HolisticCubeCompoundKey;
++import org.apache.pig.impl.builtin.PartitionMaxGroup;
+ import org.apache.pig.impl.builtin.PartitionSkewedKeys;
+ import org.apache.pig.impl.builtin.PoissonSampleLoader;
++import org.apache.pig.impl.builtin.PostProcessCube;
+ import org.apache.pig.impl.builtin.RandomSampleLoader;
+ import org.apache.pig.impl.io.FileLocalizer;
+ import org.apache.pig.impl.io.FileSpec;
++import org.apache.pig.impl.io.ReadSingleLoader;
+ import org.apache.pig.impl.plan.CompilationMessageCollector;
+ import org.apache.pig.impl.plan.CompilationMessageCollector.MessageType;
+ import org.apache.pig.impl.plan.DepthFirstWalker;
+@@ -111,6 +124,7 @@ import org.apache.pig.impl.util.UriUtil;
+ import org.apache.pig.impl.util.Utils;
+ import org.apache.pig.newplan.logical.relational.LOJoin;
+ 
++
+ /**
+  * The compiler that compiles a given physical plan
+  * into a DAG of MapReduce operators which can then 
+@@ -1084,13 +1098,147 @@ public class MRCompiler extends PhyPlanVisitor {
+                     processUDFs(plan);
+                 }
+             phyToMROpMap.put(op, curMROp);
++            
++	    // This is required for holistic cubing. The post aggregation step that aggregates the output
++	    // of full cube job is appended here.
++	    List<PhysicalOperator> preds = plan.getPredecessors(op);
++	    if (preds != null) {
++		PhysicalOperator pred = preds.get(0);
++		if (pred instanceof POCube) {
++		    // we need all these checks to proceed and append post aggregate UDF correctly
++		    if (((POCube) pred).isPostAggRequired() == true && ((POCube) pred).getHolisticMeasure() != null
++			    && ((POCube) pred).getPostAggLR() != null) {
++			// This is the final post aggregation job
++			FileSpec vpOutput = getTempFileSpec();
++			endSingleInputPlanWithStr(vpOutput);
++			curMROp = startNew(vpOutput, curMROp);
++			compiledInputs[0] = curMROp;
++			appendPostAggregateCubeJob(op, ((POCube) pred).getNumDimensions(),
++			        ((POCube) pred).getPostAggLR());
++
++		    }
++		}
++	    }
+         }catch(Exception e){
+             int errCode = 2034;
+             String msg = "Error compiling operator " + op.getClass().getSimpleName();
+             throw new MRCompilerException(msg, errCode, PigException.BUG, e);
+         }
+     }
+-    
++
++    // This job appends the post aggregation UDFs corresponding to the measure. Refer visitCube function
++    // for more details of why this is required.
++    private void appendPostAggregateCubeJob(POForEach op, int totalDimensions, PhysicalOperator lrForPostAgg)
++	    throws PlanException {
++	try {
++	    // MRJOB-3 requires the requested parallelism. Since this is the third job in cubing
++	    // we need to make sure the requested parallelism of the current operator (POForEach)
++	    // is used for the job.
++	    curMROp.requestedParallelism = op.getRequestedParallelism();
++
++	    List<PhysicalPlan> feIPlans = new ArrayList<PhysicalPlan>();
++	    List<Boolean> feFlat = new ArrayList<Boolean>();
++	    POForEach foreach = null;
++
++	    PhysicalPlan fPlan = new PhysicalPlan();
++	    POProject projStar = new POProject(new OperatorKey(scope, nig.getNextNodeId(scope)));
++	    projStar.setStar(true);
++	    fPlan.add(projStar);
++	    feIPlans.add(fPlan);
++	    feFlat.add(false);
++
++	    foreach = new POForEach(new OperatorKey(scope, nig.getNextNodeId(scope)), -1, feIPlans, feFlat);
++	    foreach.setResultType(DataType.BAG);
++	    foreach.visit(this);
++
++	    // Use the LR that was saved earlier containing projections of all dimensions
++	    // The LR and GR are required to group the dimensions and aggregate the
++	    // results from different bins to form the final result
++	    lrForPostAgg.visit(this);
++
++	    // create POGlobalRearrange
++	    POGlobalRearrange gr = new POGlobalRearrange(new OperatorKey(scope, nig.getNextNodeId(scope)));
++	    gr.setResultType(DataType.TUPLE);
++	    gr.visit(this);
++
++	    // create POPackage
++	    POPackage pkg = new POPackage(new OperatorKey(scope, nig.getNextNodeId(scope)));
++	    pkg.setKeyType(DataType.TUPLE);
++	    pkg.setResultType(DataType.TUPLE);
++	    pkg.setNumInps(1);
++	    boolean[] inner = { false };
++	    pkg.setInner(inner);
++	    pkg.visit(this);
++
++	    List<PhysicalPlan> innerPlans = new ArrayList<PhysicalPlan>();
++	    List<Boolean> iFlat = new ArrayList<Boolean>();
++	    // this idx is used to project the column containing measure values
++	    int idx = totalDimensions;
++
++	    List<PhysicalPlan> iPlans = op.getInputPlans();
++
++	    // depending on the measure we need to use different UDFs to get the final result
++	    // For Example: Consider the region in cube lattice <state,>. Following are the
++	    // output from the full cube job. The 3rd field being the COUNT(DISTINCT userid)
++	    // measure value.
++	    // <OH,,2>, <OH,,4> <OH,,3>
++	    // To get the final result <OH,,9> we need to group these tuples and perform SUM.
++	    for (PhysicalPlan iPlan : iPlans) {
++		List<PhysicalOperator> inputs = iPlan.getLeaves();
++		for (PhysicalOperator input : inputs) {
++		    if (input instanceof POUserFunc) {
++			if (((POUserFunc) input).getFuncSpec().getClassName().equals("org.apache.pig.builtin.COUNT") == true
++			        || ((POUserFunc) input).getFuncSpec().getClassName()
++			                .equals("org.apache.pig.builtin.COUNT_STAR") == true) {
++			    PhysicalPlan ufPlan = new PhysicalPlan();
++			    POUserFunc uf = new POUserFunc(new OperatorKey(scope, nig.getNextNodeId(scope)), -1, null,
++				    new FuncSpec(LongSum.class.getName()));
++			    uf.setResultType(DataType.LONG);
++			    ufPlan.add(uf);
++
++			    POProject bagProj = new POProject(new OperatorKey(scope, nig.getNextNodeId(scope)));
++			    bagProj.setResultType(DataType.BAG);
++			    bagProj.setColumn(1);
++			    POProject colProj = new POProject(new OperatorKey(scope, nig.getNextNodeId(scope)));
++			    colProj.setResultType(DataType.BAG);
++			    colProj.setColumn(idx);
++			    idx++;
++
++			    ufPlan.add(bagProj);
++			    ufPlan.add(colProj);
++			    ufPlan.connect(bagProj, colProj);
++			    ufPlan.connect(colProj, uf);
++			    innerPlans.add(ufPlan);
++			    iFlat.add(false);
++			} else {
++			    // FIXME: What PostAggregate UDFs should be used for other measures?
++			    // Currently focussing only on COUNT + DISTINCT
++			}
++		    } else {
++			if (input instanceof POProject) {
++			    PhysicalPlan projPlan = new PhysicalPlan();
++			    POProject proj = new POProject(new OperatorKey(scope, nig.getNextNodeId(scope)));
++			    proj.setColumn(0);
++			    projPlan.add(proj);
++			    innerPlans.add(projPlan);
++			    iFlat.add(true);
++			}
++		    }
++		}
++	    }
++
++	    POForEach foreachSum = new POForEach(new OperatorKey(scope, nig.getNextNodeId(scope)), -1, innerPlans,
++		    iFlat);
++	    foreachSum.setResultType(DataType.BAG);
++	    foreachSum.visit(this);
++
++	} catch (VisitorException e) {
++	    throw new PlanException(e);
++	} catch (IOException e) {
++	    throw new PlanException(e);
++	}
++    }
++
+     @Override
+     public void visitGlobalRearrange(POGlobalRearrange op) throws VisitorException{
+         try{
+@@ -1792,7 +1940,693 @@ public class MRCompiler extends PhyPlanVisitor {
+             throw new MRCompilerException(msg, errCode, PigException.BUG, e);
+         }
+     }
+-    
++
++    public void visitCube(POCube op) throws VisitorException {
++	// if the measure is not holistic we do not need mr-cube approach
++	// we can fallback to naive approach. Also in illustrate mode
++	// we can just illustrate using the naive approach
++	if (op.isHolistic() == true && !pigContext.inIllustrator) {
++	    try {
++		// save the so far compiled mrjob. After inserting the new sample job
++		// the old job will continue compiling other operators
++		MapReduceOper prevJob = compiledInputs[0];
++
++		// the output of sample job i.e region label and corresponding
++		// value partitions will be saved to this file
++		FileSpec sampleJobOutput = getTempFileSpec();
++
++		double sampleSize = 0.0;
++		sampleSize = determineSamplePercentage(op);
++		if (sampleSize == 0.0) {
++		    LOG.info("Input dataset is estimated to be small enough for performing naive cubing.");
++		} else {
++		    if (op.getAlgebraicAttr() == null) {
++			LOG.warn("[CUBE] Algebraic attribute is null. Falling back to naive cubing.");
++		    } else {
++			// If the measure is found to be holistic then to get to the final results
++			// we need the following MRJobs
++			// MRJOB-1: Sample naive cube job - to determine the value partition for large groups
++			// MRJOB-2: Actual full cube job - based on output of MRJOB-1 it performs cubing
++			// and partitions the large groups to their corresponding bins and executes the measure
++			// MRJOB-3: Post aggregation job - Aggregates output of MRJOB-2 to produce final results
++
++			// post aggregation job need information about the number of dimensions.
++			// so storing it with POCube operator for later use by post aggregation job
++			int[] totalDimensions = new int[1];
++			curMROp = getCubeSampleJob(op, sampleSize, sampleJobOutput, totalDimensions);
++			op.setNumDimensions(totalDimensions[0]);
++
++			// manually connect the sample job with the previous job. This cannot be automatically done
++			// because the output of sample job is not the input of next job
++			MRPlan.add(curMROp);
++			MRPlan.connect(curMROp, prevJob);
++
++			// sample job is inserted now. resetting back to original compilation sequence
++			curMROp = prevJob;
++
++			// setting up the result of sample job (which is the annotated lattice)
++			// to the curMROp. This file will be distributed using distributed cache
++			// to all mappers running the actual full cube materialization job
++			curMROp.setAnnotatedLatticeFile(sampleJobOutput.getFileName());
++			curMROp.setFullCubeJob(true);
++
++			// since the requested parallelism was adjusted to 1 in sample job
++			// we need to reset the requested parallelism back to the original value
++			// MRJOB-1 requires the parallelism to be 1. MRJOB-2 and MRJOB-3 requires
++			// the parallelism as requested by the user.
++			curMROp.requestedParallelism = op.getRequestedParallelism();
++
++			// The original plan sequence contains CubeDimensions/RollupDimensions UDF. This
++			// cannot be used anymore. So replace it with HolisticCube UDF
++			byte algAttrType = modifyCubeUDFsForHolisticMeasure(op, sampleJobOutput.getFileName());
++			compiledInputs[0] = curMROp;
++
++			// add the column that contains the bin number to local rearrange.
++			// the bin numbers for large groups are calculated by algebraicAttribute%partitionFactor.
++			// save this LR in POCube as it will be required during post aggregation job.
++			PhysicalOperator lrForPostAgg = addAlgAttrColToLR(op, algAttrType);
++			op.setPostAggLR(lrForPostAgg);
++			curMROp.setMapDone(true);
++
++			insertPostProcessUDF(op);
++
++			// Post aggregation of output is required to get the correct aggregated result.
++			// We cannot insert the post aggregate job here because we have not visited the
++			// foreach that contains measure yet. While visiting the POForEach that contains
++			// holistic measure then we will append the post aggregation steps.
++			// See visitPOForEach for the conditional check that inserts post aggregation step.
++			op.setPostAggRequired(true);
++		    }
++		}
++	    } catch (PlanException e) {
++		int errCode = 2167;
++		String msg = "Error compiling operator " + op.getClass().getSimpleName();
++		throw new MRCompilerException(msg, errCode, PigException.BUG, e);
++	    } catch (IOException e) {
++		int errCode = 2167;
++		String msg = "Error compiling operator " + op.getClass().getSimpleName();
++		throw new MRCompilerException(msg, errCode, PigException.BUG, e);
++	    }
++	}
++    }
++
++    // This function adds the algebraic attribute column to dimensions list
++    // which now contains algebraicAttribute%partitionFactor value
++    private PhysicalOperator addAlgAttrColToLR(POCube op, byte algAttrType) throws PlanException {
++	PhysicalPlan mapPlan = curMROp.mapPlan;
++	PhysicalOperator succ = (PhysicalOperator) mapPlan.getLeaves().get(0);
++	PhysicalOperator cloneLR;
++	try {
++	    cloneLR = succ.clone();
++	} catch (CloneNotSupportedException e) {
++	    throw new PlanException(e);
++	}
++	if (succ instanceof POLocalRearrange) {
++	    List<PhysicalPlan> inps = ((POLocalRearrange) succ).getPlans();
++	    PhysicalPlan pplan = new PhysicalPlan();
++	    POProject proj = new POProject(new OperatorKey(scope, nig.getNextNodeId(scope)));
++	    proj.setColumn(inps.size());
++	    proj.setResultType(algAttrType);
++	    pplan.add(proj);
++	    inps.add(pplan);
++	    ((POLocalRearrange) succ).setPlans(inps);
++	}
++	return cloneLR;
++    }
++
++    // This function determines the sampling percentage based on the estimated
++    // total number of rows in the input dataset.
++    private double determineSamplePercentage(POCube op) throws IOException {
++	PhysicalOperator opRoot = null;
++	List<MapReduceOper> roots = MRPlan.getRoots();
++	long inputFileSize = 0;
++	long actualTupleSize = 0;
++	long estTotalRows = 0;
++	double sampleSize = 0.0;
++
++	if (roots.size() > 1) {
++	    // FIXME what to do if there are two loads?
++	    // what if cube operator predecessor is not
++	    // load? should take the output of join or cogroup?
++	    // if predecessor is not load then actual tuple size
++	    // cannot be estimated (only in-memory tuple size can
++	    // be determined)
++	} else {
++	    PhysicalPlan mapPlan = roots.get(0).mapPlan;
++	    opRoot = mapPlan.getRoots().get(0);
++
++	    if (opRoot instanceof POLoad) {
++		inputFileSize = getInputFileSize((POLoad) opRoot);
++		actualTupleSize = getActualTupleSize((POLoad) opRoot);
++		estTotalRows = inputFileSize / actualTupleSize;
++
++		// Refer mr-cube paper (http://arnab.org/files/mrcube.pdf)
++		// page #6 for sample selection and experimentation
++		if (estTotalRows > 2000000000) {
++		    // for #rows beyond 2B, 2M samples are sufficient
++		    sampleSize = (double) 2000000 / (double) estTotalRows;
++		} else if (estTotalRows > 2000000 && estTotalRows < 2000000000) {
++		    // for #rows between 2M to 2B, 100K tuples are sufficient
++		    sampleSize = (double) 100000 / (double) estTotalRows;
++		} else {
++		    sampleSize = 0.0;
++		}
++	    }
++	}
++
++	return sampleSize;
++    }
++
++    // This method modifies the map plan containing CubeDimensions/RollupDimensions and replaces
++    // it will HolisticCube UDF.
++    // FIXME Try if this works for query containing two cube operators.
++    private byte modifyCubeUDFsForHolisticMeasure(POCube op, String annotatedLatticeFile) throws PlanException {
++	byte algAttrType = DataType.BYTEARRAY;
++	PhysicalPlan mapPlan = curMROp.mapPlan;
++	Map<OperatorKey, PhysicalOperator> poMap = mapPlan.getKeys();
++
++	// Iterate through the plan to get the inputs for HolisticCube UDF
++	// i.e. all projections from CubeDimensions/RollupDimensions UDFs
++	for (Map.Entry<OperatorKey, PhysicalOperator> entry : poMap.entrySet()) {
++	    PhysicalOperator pop = entry.getValue();
++	    if (pop instanceof POForEach) {
++		boolean isForeachInsertedByCube = false;
++
++		String[] ufArgs = new String[op.getCubeLattice().size()];
++		getLatticeAsStringArray(ufArgs, op.getCubeLattice());
++		PhysicalPlan dimPlan = new PhysicalPlan();
++		POUserFunc hUserFunc = new POUserFunc(new OperatorKey(scope, nig.getNextNodeId(scope)),
++		        op.getRequestedParallelism(), null, new FuncSpec(HolisticCube.class.getName(), ufArgs));
++		hUserFunc.setResultType(DataType.BAG);
++		dimPlan.add(hUserFunc);
++
++		List<PhysicalPlan> feIPlans = new ArrayList<PhysicalPlan>();
++		List<Boolean> feFlat = new ArrayList<Boolean>();
++		feIPlans.add(dimPlan);
++		feFlat.add(true);
++
++		// connect the dimensions from CubeDimensions and RollupDimensions UDF to
++		// a separate foreach operator containing HolisticCube UDF.
++		// Once all dimensions are connected replace the existing foreach operator
++		// with the newly created foreach operator
++		for (PhysicalPlan pp : ((POForEach) pop).getInputPlans()) {
++		    for (PhysicalOperator leaf : pp.getLeaves()) {
++			if (leaf instanceof POUserFunc) {
++			    String className = ((POUserFunc) leaf).getFuncSpec().getClassName();
++			    if (className.equals(CubeDimensions.class.getName()) == true) {
++				isForeachInsertedByCube = true;
++				for (PhysicalOperator expOp : ((POUserFunc) leaf).getInputs()) {
++				    dimPlan.add(expOp);
++				    // if its a cast operator then connect the inner projections
++				    if (expOp instanceof POCast) {
++					for (PhysicalOperator projOp : ((POCast) expOp).getInputs()) {
++					    dimPlan.add(projOp);
++					    dimPlan.connect(projOp, expOp);
++					}
++				    }
++				    dimPlan.connect(expOp, hUserFunc);
++				}
++
++			    } else if (className.equals(RollupDimensions.class.getName()) == true) {
++				isForeachInsertedByCube = true;
++				for (PhysicalOperator expOp : ((POUserFunc) leaf).getInputs()) {
++				    dimPlan.add(expOp);
++				    // if its a cast operator then connect the inner projections
++				    if (expOp instanceof POCast) {
++					for (PhysicalOperator projOp : ((POCast) expOp).getInputs()) {
++					    dimPlan.add(projOp);
++					    dimPlan.connect(projOp, expOp);
++					}
++				    }
++				    dimPlan.connect(expOp, hUserFunc);
++				}
++			    }
++			} else {
++			    // if not UserFunc then it will be ProjectExpression/CastExpression.
++			    // These projections will be the non-dimensional columns.
++			    // Find the algebraic attribute column from the non-dimensional
++			    // columns and project a clone of it as a last dimensional column.
++
++			    PhysicalPlan nonDimPlan = new PhysicalPlan();
++
++			    // if its a cast operator then connect the inner projections
++			    if (leaf instanceof POCast) {
++				for (PhysicalOperator castInp : ((POCast) leaf).getInputs()) {
++				    // these non-dimensional columns are projected only after UserFuncExpressions
++				    // so we can be sure that the algebraic attribute will be the
++				    // last one to be appended to dimensions list
++				    if (op.getAlgebraicAttr().equals(((POCast) leaf).getFieldSchema().getName()) == true) {
++					try {
++					    POCast cloneCast = (POCast) leaf.clone();
++					    // add cloned copy to dimension list and original one to non-dimensional
++					    // list
++					    dimPlan.add(cloneCast);
++					    nonDimPlan.add(leaf);
++					    algAttrType = ((POCast) leaf).getResultType();
++					    for (PhysicalOperator hprojOp : ((POCast) leaf).getInputs()) {
++						POProject cloneProj = (POProject) hprojOp.clone();
++						cloneProj.setInputs(hprojOp.getInputs());
++
++						List<PhysicalOperator> castInps = new ArrayList<PhysicalOperator>();
++						castInps.add(cloneProj);
++						cloneCast.setInputs(castInps);
++
++						dimPlan.add(cloneProj);
++						dimPlan.connect(cloneProj, cloneCast);
++
++						nonDimPlan.add(castInp);
++						nonDimPlan.connect(castInp, leaf);
++					    }
++					    dimPlan.connect(cloneCast, hUserFunc);
++					    feIPlans.add(nonDimPlan);
++					    feFlat.add(false);
++					} catch (CloneNotSupportedException e) {
++					    throw new PlanException(e);
++					}
++
++				    } else {
++					nonDimPlan.add(leaf);
++					nonDimPlan.add(castInp);
++					nonDimPlan.connect(castInp, leaf);
++					feIPlans.add(nonDimPlan);
++					feFlat.add(false);
++				    }
++				}
++
++			    } else {
++				// else it will be POProject
++				// POProject doesn't store the alias of the projected column.
++				// the alias of the columns are attached to POCast and not to POProject.
++				// alias of the column is a MUST for holistic cubing because the
++				// algebraic attribute will be identified by the column alias and
++				// projected to HolisticCube UDF
++				// FIXME: Don't know how to handle this case!!
++				throw new PlanException(
++				        "Cannot determine algebraic attribute's alias from POProject. "
++				                + "May be a cast is missing in the schema corresponding to algebraic attribute '"
++				                + op.getAlgebraicAttr() + "'.");
++			    }
++			}
++		    }
++		}
++
++		// check if new foreach is inserted successfully into plan and replace it with old foreach
++		if (isForeachInsertedByCube == true) {
++		    POForEach foreach = new POForEach(new OperatorKey(scope, nig.getNextNodeId(scope)),
++			    op.getRequestedParallelism(), feIPlans, feFlat);
++		    foreach.addOriginalLocation(pop.getAlias(), pop.getOriginalLocations());
++		    foreach.setInputs(pop.getInputs());
++		    mapPlan.replace(pop, foreach);
++
++		    // at this place we have modified the plan to fit the HolisticCube UDF
++		    // FIXME if this is allowed to continue then ConcurrentModificationException occurs
++		    break;
++		}
++	    }
++	}
++
++	return algAttrType;
++    }
++
++    // This function inserts PostProcessCube UDF to the reduce plan of the full cube job.
++    // The PostProcessCube UDF just strips off the bin numbers from key and values
++    private void insertPostProcessUDF(POCube op) throws PlanException {
++	List<PhysicalPlan> feIPlans = new ArrayList<PhysicalPlan>();
++	List<Boolean> feFlat = new ArrayList<Boolean>();
++	POForEach foreach = null;
++
++	PhysicalPlan fPlan = new PhysicalPlan();
++	POProject projStar = new POProject(new OperatorKey(scope, nig.getNextNodeId(scope)));
++	projStar.setStar(true);
++	fPlan.add(projStar);
++
++	POUserFunc userFunc = new POUserFunc(new OperatorKey(scope, nig.getNextNodeId(scope)),
++	        op.getRequestedParallelism(), null, new FuncSpec(PostProcessCube.class.getName()));
++	userFunc.setResultType(DataType.TUPLE);
++	fPlan.add(userFunc);
++	fPlan.connect(projStar, userFunc);
++	feIPlans.add(fPlan);
++	feFlat.add(true);
++
++	foreach = new POForEach(new OperatorKey(scope, nig.getNextNodeId(scope)), -1, feIPlans, feFlat);
++	foreach.setResultType(DataType.BAG);
++	try {
++	    foreach.visit(this);
++	} catch (VisitorException e) {
++	    throw new PlanException(e);
++	}
++    }
++
++    // This method modifies the current mr-plan to insert a new sampling job.
++    // This function contains the following sequence of operatos
++    // 1) POLoad
++    // 2) POForEach with star projection
++    // 3) POFilter with ConstantExpression containing sample size and LessThanExpr
++    // The way POFilter is used is similar to the way SAMPLE operator works
++    // 4) POForEach with HolisticCubeCompoundKey UDF
++    // 5) POLocalRearrange
++    // 6) POGlobalRearrange
++    // 7) Finally attaches a reduce plan
++    private MapReduceOper getCubeSampleJob(POCube op, double sampleSize, FileSpec sampleJobOutput, int[] totalDimensions)
++	    throws VisitorException {
++	try {
++	    PhysicalOperator opRoot = null;
++	    POForEach foreach = null;
++
++	    MapReduceOper mro = getMROp();
++	    curMROp = mro;
++	    curMROp.setMapDone(false);
++	    compiledInputs[0] = curMROp;
++	    long inputFileSize = 0;
++	    long actualTupleSize = 0;
++
++	    List<PhysicalOperator> dimOperators = new ArrayList<PhysicalOperator>();
++	    List<PhysicalOperator> nonDimOperators = new ArrayList<PhysicalOperator>();
++	    List<Boolean> dimFlat = new ArrayList<Boolean>();
++	    List<MapReduceOper> roots = MRPlan.getRoots();
++
++	    // FIXME what if the input of cube is not load?
++	    // convert it to a generic case?
++	    // get the inputs of cube and then perform sampling on that input
++	    if (roots.size() > 1) {
++		// FIXME what to do if there are two loads?
++	    } else {
++		PhysicalPlan mapPlan = roots.get(0).mapPlan;
++		opRoot = mapPlan.getRoots().get(0);
++
++		if (opRoot instanceof POLoad) {
++		    mro.mapPlan.add(opRoot);
++		    inputFileSize = getInputFileSize((POLoad) opRoot);
++		    actualTupleSize = getActualTupleSize((POLoad) opRoot);
++		}
++
++		// if the predecessor of cube operator is load then there will
++		// be a foreach plan with CubeDimensions/RollupDimensions UDFs
++		// we do not need those udfs for sampling we just need the dimension
++		// columns and non-dimensional columns. The CubeDimensions/RollupDimensions
++		// UDF will be replaced by HolisticCubeCompoundKey UDF with all the
++		// dimension columns attached to it.
++
++		// Foreach with star projection
++		List<PhysicalPlan> feIPlans = new ArrayList<PhysicalPlan>();
++		List<Boolean> feFlat = new ArrayList<Boolean>();
++
++		PhysicalPlan projStarPlan = new PhysicalPlan();
++		POProject projStar = new POProject(new OperatorKey(scope, nig.getNextNodeId(scope)));
++		projStar.setStar(true);
++		projStarPlan.add(projStar);
++		feIPlans.add(projStarPlan);
++		feFlat.add(false);
++		foreach = new POForEach(new OperatorKey(scope, nig.getNextNodeId(scope)), -1, feIPlans, feFlat);
++		foreach.setResultType(DataType.BAG);
++		foreach.visit(this);
++
++		// collect all dimension columns and non-dimension columns
++		// dimension columns will be passed to HolisticCubeCompoundKey UDF
++		PhysicalOperator po = mapPlan.getSuccessors(opRoot).get(0);
++		if (po instanceof POForEach) {
++		    for (PhysicalPlan iPlan : ((POForEach) po).getInputPlans()) {
++			for (PhysicalOperator pOp : iPlan.getLeaves()) {
++			    if (pOp instanceof POUserFunc) {
++				for (PhysicalOperator inp : pOp.getInputs()) {
++				    dimOperators.add(inp);
++				}
++			    } else {
++				// The non-dimensional columns will be pushed down.
++				// these columns will be used later by measures
++				nonDimOperators.add(pOp);
++			    }
++			}
++		    }
++		}
++
++		totalDimensions[0] = dimOperators.size();
++	    }
++
++	    // Filter plan replicating the SAMPLE operator
++	    POFilter filter = new POFilter(new OperatorKey(scope, nig.getNextNodeId(scope)));
++	    filter.setResultType(DataType.BAG);
++	    filter.visit(this);
++
++	    PhysicalPlan filterInnerPlan = new PhysicalPlan();
++	    POUserFunc randomUF = new POUserFunc(new OperatorKey(scope, nig.getNextNodeId(scope)), -1, null,
++		    new FuncSpec(RANDOM.class.getName()));
++	    randomUF.setResultType(DataType.DOUBLE);
++	    filterInnerPlan.add(randomUF);
++
++	    ConstantExpression ce = new ConstantExpression(new OperatorKey(scope, nig.getNextNodeId(scope)));
++	    ce.setValue(sampleSize);
++	    ce.setResultType(DataType.DOUBLE);
++	    filterInnerPlan.add(ce);
++
++	    LessThanExpr le = new LessThanExpr(new OperatorKey(scope, nig.getNextNodeId(scope)));
++	    le.setResultType(DataType.BOOLEAN);
++	    le.setOperandType(DataType.DOUBLE);
++	    le.setLhs(randomUF);
++	    le.setRhs(ce);
++	    filterInnerPlan.add(le);
++
++	    filterInnerPlan.connect(randomUF, le);
++	    filterInnerPlan.connect(ce, le);
++	    filter.setPlan(filterInnerPlan);
++
++	    // Foreach plan with HolisticCubeCoupundKey UDF
++	    List<PhysicalPlan> foreachInpPlans = new ArrayList<PhysicalPlan>();
++	    PhysicalPlan userFuncPlan = new PhysicalPlan();
++	    String[] lattice = new String[op.getCubeLattice().size()];
++	    getLatticeAsStringArray(lattice, op.getCubeLattice());
++	    POUserFunc hUserFunc = new POUserFunc(new OperatorKey(scope, nig.getNextNodeId(scope)), -1, null,
++		    new FuncSpec(HolisticCubeCompoundKey.class.getName(), lattice));
++	    hUserFunc.setResultType(DataType.BAG);
++	    userFuncPlan.add(hUserFunc);
++
++	    // add dimensional columns
++	    for (PhysicalOperator dimOp : dimOperators) {
++		if (dimOp instanceof POCast) {
++		    for (PhysicalOperator innerOp : dimOp.getInputs()) {
++			POProject innerProj = new POProject(new OperatorKey(scope, nig.getNextNodeId(scope)));
++			innerProj.setResultType(innerOp.getResultType());
++			innerProj.setColumn(((POProject) innerOp).getColumn());
++			userFuncPlan.add(innerProj);
++			userFuncPlan.connect(innerProj, hUserFunc);
++		    }
++		} else if (dimOp instanceof POProject) {
++		    POProject proj = new POProject(new OperatorKey(scope, nig.getNextNodeId(scope)));
++		    proj.setResultType(dimOp.getResultType());
++		    proj.setColumn(((POProject) dimOp).getColumn());
++		    userFuncPlan.add(proj);
++		    userFuncPlan.connect(proj, hUserFunc);
++		}
++	    }
++	    foreachInpPlans.add(userFuncPlan);
++	    dimFlat.add(true);
++
++	    // add non-dimensional columns
++	    for (PhysicalOperator nDimOp : nonDimOperators) {
++		PhysicalPlan pPlan = new PhysicalPlan();
++		if (nDimOp instanceof POCast) {
++		    for (PhysicalOperator innerOp : nDimOp.getInputs()) {
++			POProject innerProj = new POProject(new OperatorKey(scope, nig.getNextNodeId(scope)));
++			innerProj.setResultType(innerOp.getResultType());
++			innerProj.setColumn(((POProject) innerOp).getColumn());
++			pPlan.add(innerProj);
++		    }
++		} else if (nDimOp instanceof POProject) {
++		    POProject proj = new POProject(new OperatorKey(scope, nig.getNextNodeId(scope)));
++		    proj.setResultType(nDimOp.getResultType());
++		    proj.setColumn(((POProject) nDimOp).getColumn());
++		    pPlan.add(proj);
++		}
++		foreachInpPlans.add(pPlan);
++		dimFlat.add(false);
++	    }
++
++	    POForEach fe = new POForEach(new OperatorKey(scope, nig.getNextNodeId(scope)), -1, foreachInpPlans, dimFlat);
++	    fe.setResultType(DataType.BAG);
++	    fe.visit(this);
++
++	    // Rearrange operations
++	    List<PhysicalPlan> lrPlans = new ArrayList<PhysicalPlan>();
++	    PhysicalPlan lrPlan = new PhysicalPlan();
++
++	    // POProject's for Local Rearrange
++	    POProject lrProj = new POProject(new OperatorKey(scope, nig.getNextNodeId(scope)));
++	    lrProj.setColumn(0);
++	    lrProj.setResultType(DataType.TUPLE);
++	    lrPlan.add(lrProj);
++	    lrPlans.add(lrPlan);
++
++	    // create local rearrange
++	    POLocalRearrange lr = new POLocalRearrange(new OperatorKey(scope, nig.getNextNodeId(scope)));
++	    lr.setKeyType(DataType.TUPLE);
++	    lr.setIndex(0);
++	    lr.setPlans(lrPlans);
++	    lr.setResultType(DataType.TUPLE);
++	    lr.visit(this);
++
++	    // create POGlobalRearrange
++	    POGlobalRearrange gr = new POGlobalRearrange(new OperatorKey(scope, nig.getNextNodeId(scope)));
++	    gr.setResultType(DataType.TUPLE);
++	    gr.visit(this);
++
++	    // generate the reduce plan for this sampling job
++	    generateReducePlanSampleJob(op, mro, sampleJobOutput, actualTupleSize, inputFileSize);
++	    return mro;
++	} catch (PlanException e) {
++	    int errCode = 2167;
++	    String msg = "Error compiling operator " + op.getClass().getSimpleName();
++	    throw new MRCompilerException(msg, errCode, PigException.BUG, e);
++	} catch (ExecException e) {
++	    int errCode = 2167;
++	    String msg = "Error compiling operator " + op.getClass().getSimpleName();
++	    throw new MRCompilerException(msg, errCode, PigException.BUG, e);
++	} catch (IOException e) {
++	    int errCode = 2167;
++	    String msg = "Error compiling operator " + op.getClass().getSimpleName();
++	    throw new MRCompilerException(msg, errCode, PigException.BUG, e);
++	}
++    }
++
++    // Relies on InputSizeReducerEstimator for getting the total file size
++    // It will try to determine the file size from the loader or fallback
++    // to HDFS to get the file size
++    private long getInputFileSize(POLoad proot) throws IOException {
++	Configuration conf = new Configuration();
++	List<POLoad> loads = new ArrayList<POLoad>();
++	loads.add(proot);
++	return InputSizeReducerEstimator.getTotalInputFileSize(conf, loads, new org.apache.hadoop.mapreduce.Job(conf));
++    }
++
++    // FIXME ReadSingleLoader loads only the first tuple in the dataset
++    // to find the raw tuple size. This will not be accurate because some
++    // fields may have variable size (bytearray/chararray, empty values for
++    // certain fields). Hence need to figure out a better way for finding the
++    // average raw tuple size. Because of this estimation of number of rows will
++    // have high error rate.
++    // Try: Read n random samples and then determine the average tuple size
++    private long getActualTupleSize(POLoad proot) throws IOException {
++	long size = 0;
++	Configuration conf = new Configuration();
++	String fileName = proot.getLFile().getFileName();
++	ReadSingleLoader rsl = new ReadSingleLoader(proot.getLoadFunc(), conf, fileName, 0);
++	size = rsl.getRawTupleSize();
++	if (size == -1) {
++	    throw new IOException("Cannot determine the raw size of the tuple.");
++	}
++	return size;
++    }
++
++    private long getBytesPerReducer() {
++	Configuration conf = new Configuration();
++	return conf.getLong(PigReducerEstimator.BYTES_PER_REDUCER_PARAM, PigReducerEstimator.DEFAULT_BYTES_PER_REDUCER);
++    }
++
++    // This method generates reduce plan for cube sample job.
++    // It inserts the following operators to the plan
++    // 1) POPackage
++    // 2) POForEach with PartitionMaxGroup UDF
++    // 3) POSort for enabling secondary sort
++    // 4) End the plan by storing the annotated lattice
++    private void generateReducePlanSampleJob(POCube op, MapReduceOper mro, FileSpec sampleJobOutput,
++	    long actualTupleSize, long overallDataSize) throws VisitorException {
++	try {
++	    // create POPackage
++	    POPackage pkg = new POPackage(new OperatorKey(scope, nig.getNextNodeId(scope)));
++	    pkg.setKeyType(DataType.TUPLE);
++	    pkg.setResultType(DataType.TUPLE);
++	    pkg.setNumInps(1);
++	    boolean[] inner = { false };
++	    pkg.setInner(inner);
++	    pkg.visit(this);
++
++	    // Foreach with PartitionMaxGroup UDF
++	    List<PhysicalPlan> inpPlans = new ArrayList<PhysicalPlan>();
++	    List<Boolean> flat = new ArrayList<Boolean>();
++
++	    PhysicalPlan projPlan = new PhysicalPlan();
++	    POProject proj = new POProject(new OperatorKey(scope, nig.getNextNodeId(scope)));
++	    proj.setColumn(0);
++	    proj.setResultType(DataType.TUPLE);
++	    projPlan.add(proj);
++	    inpPlans.add(projPlan);
++	    flat.add(false);
++
++	    // Reuse the property used by skewedjoin for getting the percentage usage of memory
++	    String percentMemUsage = pigContext.getProperties().getProperty("pig.skewedjoin.reduce.memusage",
++		    String.valueOf(PartitionSkewedKeys.DEFAULT_PERCENT_MEMUSAGE));
++	    PhysicalPlan ufPlan = new PhysicalPlan();
++	    String[] ufArgs = new String[4];
++	    ufArgs[0] = String.valueOf(overallDataSize);
++	    ufArgs[1] = String.valueOf(getBytesPerReducer());
++	    ufArgs[2] = String.valueOf(actualTupleSize);
++	    ufArgs[3] = String.valueOf(percentMemUsage);
++	    POUserFunc uf = new POUserFunc(new OperatorKey(scope, nig.getNextNodeId(scope)), -1, null, new FuncSpec(
++		    PartitionMaxGroup.class.getName(), ufArgs));
++	    uf.setResultType(DataType.TUPLE);
++	    ufPlan.add(uf);
++	    flat.add(true);
++
++	    // project only the value from package operator. key is not required since the value itself contains
++	    // the key in 1st field of each tuple
++	    POProject ufProj = new POProject(new OperatorKey(scope, nig.getNextNodeId(scope)));
++	    ufProj.setColumn(1);
++	    ufProj.setResultType(DataType.BAG);
++	    ufPlan.add(ufProj);
++	    inpPlans.add(ufPlan);
++
++	    // enable secondary sort on group values
++	    List<Boolean> ascCol = new ArrayList<Boolean>();
++	    List<PhysicalPlan> sortPlans = new ArrayList<PhysicalPlan>();
++	    ascCol.add(false);
++	    POSort sort = new POSort(new OperatorKey(scope, nig.getNextNodeId(scope)), op.getRequestedParallelism(),
++		    null, sortPlans, ascCol, null);
++	    sort.setResultType(DataType.BAG);
++
++	    List<PhysicalOperator> inputs = new ArrayList<PhysicalOperator>();
++	    inputs.add(ufProj);
++
++	    PhysicalPlan sortPlan = new PhysicalPlan();
++	    POProject sortProj = new POProject(new OperatorKey(scope, nig.getNextNodeId(scope)));
++	    sortProj.setColumn(1);
++	    sortProj.setResultType(DataType.TUPLE);
++	    sortPlan.add(sortProj);
++	    sortPlans.add(sortPlan);
++	    sort.setInputs(inputs);
++
++	    ufPlan.add(sort);
++	    ufPlan.connect(ufProj, sort);
++	    ufPlan.connect(sort, uf);
++
++	    // create ForEach with PartitionMaxGroup for finding the group size
++	    POForEach fe = new POForEach(new OperatorKey(scope, nig.getNextNodeId(scope)),
++		    op.getRequestedParallelism(), inpPlans, flat);
++	    fe.setResultType(DataType.BAG);
++	    fe.visit(this);
++
++	    // finally store the annotated lattice to HDFS
++	    // this file will contains tuples with 2 fields
++	    // 1st field - region label
++	    // 2nd field - partition factor
++	    endSingleInputPlanWithStr(sampleJobOutput);
++	} catch (PlanException e) {
++	    int errCode = 2167;
++	    String msg = "Error compiling operator " + op.getClass().getSimpleName();
++	    throw new MRCompilerException(msg, errCode, PigException.BUG, e);
++	} catch (IOException e) {
++	    int errCode = 2167;
++	    String msg = "Error compiling operator " + op.getClass().getSimpleName();
++	    throw new MRCompilerException(msg, errCode, PigException.BUG, e);
++	}
++    }
++
++    private void getLatticeAsStringArray(String[] ufArgs, List<Tuple> cubeLattice) {
++	for (int i = 0; i < cubeLattice.size(); i++) {
++	    ufArgs[i] = cubeLattice.get(i).toString();
++	    // strip off the parantheses when tuple is converted to string
++	    ufArgs[i] = ufArgs[i].substring(1, ufArgs[i].length() - 1);
++	}
++    }
++
+     @Override
+     public void visitSkewedJoin(POSkewedJoin op) throws VisitorException {
+ 		try {
+diff --git src/org/apache/pig/backend/hadoop/executionengine/mapReduceLayer/MapReduceOper.java src/org/apache/pig/backend/hadoop/executionengine/mapReduceLayer/MapReduceOper.java
+index b87c209..643e780 100644
+--- src/org/apache/pig/backend/hadoop/executionengine/mapReduceLayer/MapReduceOper.java
++++ src/org/apache/pig/backend/hadoop/executionengine/mapReduceLayer/MapReduceOper.java
+@@ -98,6 +98,12 @@ public class MapReduceOper extends Operator<MROpPlanVisitor> {
+     //The quantiles file name if globalSort is true
+     String quantFile;
+     
++    // The annotated lattice used for cubing on holistic measures
++    String annotatedLatticeFile;
++        
++    // If true the cube job is actual cube job else a sampling cube job
++    boolean isFullCubeJob = false;
++    
+     //The sort order of the columns;
+     //asc is true and desc is false
+     boolean[] sortOrder;
+@@ -486,4 +492,20 @@ public class MapReduceOper extends Operator<MROpPlanVisitor> {
+     public boolean combineSmallSplits() {
+         return combineSmallSplits;
+     }
++    
++    public String getAnnotatedLatticeFile() {
++	return annotatedLatticeFile;
++    }
++
++    public void setAnnotatedLatticeFile(String annotatedLatticeFile) {
++	this.annotatedLatticeFile = annotatedLatticeFile;
++    }
++
++    public boolean isFullCubeJob() {
++	return isFullCubeJob;
++    }
++
++    public void setFullCubeJob(boolean isFullCubeJob) {
++	this.isFullCubeJob = isFullCubeJob;
++    }
+ }
+diff --git src/org/apache/pig/backend/hadoop/executionengine/mapReduceLayer/plans/MRPrinter.java src/org/apache/pig/backend/hadoop/executionengine/mapReduceLayer/plans/MRPrinter.java
+index 157caad..41e33a4 100644
+--- src/org/apache/pig/backend/hadoop/executionengine/mapReduceLayer/plans/MRPrinter.java
++++ src/org/apache/pig/backend/hadoop/executionengine/mapReduceLayer/plans/MRPrinter.java
+@@ -88,6 +88,9 @@ public class MRPrinter extends MROpPlanVisitor {
+         if (mr.getQuantFile() != null) {
+             mStream.println("Quantile file: " + mr.getQuantFile());
+         }
++	if (mr.getAnnotatedLatticeFile() != null) {
++	    mStream.println("Annotated cube lattice file: " + mr.getAnnotatedLatticeFile());
++	}
+         if (mr.getUseSecondaryKey())
+             mStream.println("Secondary sort: " + mr.getUseSecondaryKey());
+         mStream.println("----------------");
+diff --git src/org/apache/pig/backend/hadoop/executionengine/physicalLayer/expressionOperators/POCast.java src/org/apache/pig/backend/hadoop/executionengine/physicalLayer/expressionOperators/POCast.java
+index cde340c..e805e6e 100644
+--- src/org/apache/pig/backend/hadoop/executionengine/physicalLayer/expressionOperators/POCast.java
++++ src/org/apache/pig/backend/hadoop/executionengine/physicalLayer/expressionOperators/POCast.java
+@@ -1523,6 +1523,10 @@ public class POCast extends ExpressionOperator {
+         fieldSchema = s;
+     }
+     
++    public ResourceFieldSchema getFieldSchema() {
++        return fieldSchema;
++    }
++    
+     public FuncSpec getFuncSpec() {
+         return funcSpec;
+     }
+diff --git src/org/apache/pig/backend/hadoop/executionengine/physicalLayer/plans/PhyPlanVisitor.java src/org/apache/pig/backend/hadoop/executionengine/physicalLayer/plans/PhyPlanVisitor.java
+index ff65146..45ba9d2 100644
+--- src/org/apache/pig/backend/hadoop/executionengine/physicalLayer/plans/PhyPlanVisitor.java
++++ src/org/apache/pig/backend/hadoop/executionengine/physicalLayer/plans/PhyPlanVisitor.java
+@@ -252,6 +252,10 @@ public class PhyPlanVisitor extends PlanVisitor<PhysicalOperator,PhysicalPlan> {
+         //do nothing
+     }
+     
++    public void visitCube(POCube cube) throws VisitorException {
++	// do nothing
++    }
++
+     public void visitFRJoin(POFRJoin join) throws VisitorException {
+         //do nothing
+     }
+diff --git src/org/apache/pig/backend/hadoop/executionengine/physicalLayer/relationalOperators/POCube.java src/org/apache/pig/backend/hadoop/executionengine/physicalLayer/relationalOperators/POCube.java
+new file mode 100644
+index 0000000..22c5bc4
+--- /dev/null
++++ src/org/apache/pig/backend/hadoop/executionengine/physicalLayer/relationalOperators/POCube.java
+@@ -0,0 +1,161 @@
++/*
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators;
++
++import java.util.List;
++
++import org.apache.pig.backend.hadoop.executionengine.physicalLayer.PhysicalOperator;
++import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PhyPlanVisitor;
++import org.apache.pig.data.DataType;
++import org.apache.pig.data.Tuple;
++import org.apache.pig.impl.plan.OperatorKey;
++import org.apache.pig.impl.plan.VisitorException;
++
++public class POCube extends PhysicalOperator {
++
++    private boolean isHolistic;
++    private String algebraicAttr;
++    private int algebraicAttrCol;
++    private List<Tuple> cubeLattice;
++    private String holisticMeasure;
++    private boolean isPostAggRequired;
++    private PhysicalOperator postAggLR;
++    private int numDimensions;
++
++    // Holistic measures. These values will be used during post processing stage and
++    // also when printing MRPlan
++    public static final String HOLISTIC_COUNT_DISTINCT = "count_distinct";
++    public static final String HOLISTIC_TOPK = "topk";
++
++    public POCube(OperatorKey k, int rp) {
++	this(k, rp, null, false, null);
++    }
++
++    public POCube(OperatorKey k, int rp, List<PhysicalOperator> inp, boolean isHolistic, String algebraicAttr) {
++	super(k, rp, inp);
++	this.isHolistic = isHolistic;
++	this.algebraicAttr = algebraicAttr;
++	this.cubeLattice = null;
++	this.holisticMeasure = null;
++	this.isPostAggRequired = false;
++	this.postAggLR = null;
++	this.numDimensions = 0;
++    }
++
++    /**
++     * 
++     */
++    private static final long serialVersionUID = 1L;
++
++    @Override
++    public Tuple illustratorMarkup(Object in, Object out, int eqClassIndex) {
++	return null;
++    }
++
++    @Override
++    public void visit(PhyPlanVisitor v) throws VisitorException {
++	v.visitCube(this);
++    }
++
++    @Override
++    public boolean supportsMultipleInputs() {
++	return false;
++    }
++
++    @Override
++    public boolean supportsMultipleOutputs() {
++	return false;
++    }
++
++    @Override
++    public String name() {
++	String measure;
++	if (isHolistic) {
++	    measure = "holistic[" + this.getHolisticMeasure() + "]";
++	} else {
++	    measure = "algebraic";
++	}
++	return getAliasString() + "POCube[" + DataType.findTypeName(resultType) + "]" + " Measure - " + measure + " - "
++	        + mKey.toString();
++    }
++
++    public boolean isHolistic() {
++	return isHolistic;
++    }
++
++    public void setHolistic(boolean isHolistic) {
++	this.isHolistic = isHolistic;
++    }
++
++    public String getAlgebraicAttr() {
++	return algebraicAttr;
++    }
++
++    public void setAlgebraicAttr(String algebraicAttr) {
++	this.algebraicAttr = algebraicAttr;
++    }
++
++    public List<Tuple> getCubeLattice() {
++	return cubeLattice;
++    }
++
++    public void setCubeLattice(List<Tuple> cubeLattice) {
++	this.cubeLattice = cubeLattice;
++    }
++
++    public int getAlgebraicAttrCol() {
++	return algebraicAttrCol;
++    }
++
++    public void setAlgebraicAttrCol(int algebraicAttrCol) {
++	this.algebraicAttrCol = algebraicAttrCol;
++    }
++
++    public String getHolisticMeasure() {
++	return holisticMeasure;
++    }
++
++    public void setHolisticMeasure(String holisticMeasure) {
++	this.holisticMeasure = holisticMeasure;
++    }
++
++    public boolean isPostAggRequired() {
++	return isPostAggRequired;
++    }
++
++    public void setPostAggRequired(boolean isPostAggRequired) {
++	this.isPostAggRequired = isPostAggRequired;
++    }
++
++    public PhysicalOperator getPostAggLR() {
++	return postAggLR;
++    }
++
++    public void setPostAggLR(PhysicalOperator postAggLR) {
++	this.postAggLR = postAggLR;
++    }
++
++    public int getNumDimensions() {
++	return numDimensions;
++    }
++
++    public void setNumDimensions(int numDimensions) {
++	this.numDimensions = numDimensions;
++    }
++}
+diff --git src/org/apache/pig/backend/hadoop/executionengine/util/MapRedUtil.java src/org/apache/pig/backend/hadoop/executionengine/util/MapRedUtil.java
+index 0502917..dfe1148 100644
+--- src/org/apache/pig/backend/hadoop/executionengine/util/MapRedUtil.java
++++ src/org/apache/pig/backend/hadoop/executionengine/util/MapRedUtil.java
+@@ -60,6 +60,7 @@ import org.apache.pig.impl.util.Pair;
+ import org.apache.pig.impl.util.UDFContext;
+ import org.apache.pig.impl.util.Utils;
+ 
++
+ /**
+  * A class of utility static methods to be used in the hadoop map reduce backend
+  */
+@@ -150,6 +151,67 @@ public class MapRedUtil {
+         }
+         return reducerMap;
+     }
++
++    public static List<String> loadAnnotatedLatticeFromHDFS(String latticeFile, Configuration conf) throws IOException {
++	List<String> result = new ArrayList<String>();
++
++	ReadToEndLoader loader = new ReadToEndLoader(Utils.getTmpFileStorageObject(conf), conf, latticeFile, 0);
++	Tuple t;
++	while ((t = loader.getNext()) != null) {
++	    String finTup = "%s,%s";
++	    String region = t.get(0).toString();
++	    String partition = t.get(1).toString();
++	    result.add(String.format(finTup, region.substring(1, region.length() - 1), partition));
++	}
++
++	if (result.size() == 0) {
++	    // this means that the lattice file is empty
++	    log.warn("Empty lattice file: " + latticeFile);
++	    return null;
++	}
++	return result;
++    }
++    
++    public static HashMap<Tuple, Integer> loadAnnotatedLatticeFromLocalCache(String latticeFile, Configuration conf,
++	    Integer[] maxReducerCnt) throws IOException {
++	HashMap<Tuple, Integer> result = new HashMap<Tuple, Integer>();
++	boolean firstTuple = true;
++
++	// use local file system to get the keyDistFile
++	Configuration newconf = new Configuration(false);
++
++	if (conf.get("yarn.resourcemanager.principal") != null) {
++	    newconf.set("yarn.resourcemanager.principal", conf.get("yarn.resourcemanager.principal"));
++	}
++
++	if (conf.get("fs.file.impl") != null)
++	    newconf.set("fs.file.impl", conf.get("fs.file.impl"));
++	if (conf.get("fs.hdfs.impl") != null)
++	    newconf.set("fs.hdfs.impl", conf.get("fs.hdfs.impl"));
++	if (conf.getBoolean("pig.tmpfilecompression", false)) {
++	    newconf.setBoolean("pig.tmpfilecompression", true);
++	    if (conf.get("pig.tmpfilecompression.codec") != null)
++		newconf.set("pig.tmpfilecompression.codec", conf.get("pig.tmpfilecompression.codec"));
++	}
++	newconf.set(MapRedUtil.FILE_SYSTEM_NAME, "file:///");
++
++	ReadToEndLoader loader = new ReadToEndLoader(Utils.getTmpFileStorageObject(newconf), newconf, latticeFile, 0);
++	Tuple t;
++	while ((t = loader.getNext()) != null) {
++	    if (firstTuple == true) {
++		maxReducerCnt[0] = (Integer) t.get(1);
++		firstTuple = false;
++	    }
++	    result.put((Tuple) t.get(0), (Integer) t.get(1));
++	}
++
++	if (result.size() == 0) {
++	    // this means that the lattice file is empty
++	    log.warn("Empty lattice file: " + latticeFile);
++	    return null;
++	}
++	return result;
++    }
+     
+     public static void setupUDFContext(Configuration job) throws IOException {
+         UDFContext udfc = UDFContext.getUDFContext();
+diff --git src/org/apache/pig/builtin/CubeDimensions.java src/org/apache/pig/builtin/CubeDimensions.java
+index 5652029..ebd046a 100644
+--- src/org/apache/pig/builtin/CubeDimensions.java
++++ src/org/apache/pig/builtin/CubeDimensions.java
+@@ -30,6 +30,7 @@ import org.apache.pig.data.TupleFactory;
+ import org.apache.pig.impl.logicalLayer.FrontendException;
+ import org.apache.pig.impl.logicalLayer.schema.Schema;
+ import org.apache.pig.impl.logicalLayer.schema.Schema.FieldSchema;
++import org.apache.pig.impl.util.Utils;
+ 
+ import com.google.common.collect.Lists;
+ 
+@@ -70,7 +71,6 @@ public class CubeDimensions extends EvalFunc<DataBag> {
+     private static BagFactory bf = BagFactory.getInstance();
+     private static TupleFactory tf = TupleFactory.getInstance();
+     private final String allMarker;
+-    private static final String unknown = "unknown";
+ 
+     public CubeDimensions() {
+         this(null);
+@@ -82,24 +82,12 @@ public class CubeDimensions extends EvalFunc<DataBag> {
+     @Override
+     public DataBag exec(Tuple tuple) throws IOException {
+         List<Tuple> result = Lists.newArrayListWithCapacity((int) Math.pow(2, tuple.size()));
+-        convertNullToUnknown(tuple);
++        Utils.convertNullToUnknown(tuple);
+         Tuple newt = tf.newTuple(tuple.size());
+         recursivelyCube(result, tuple, 0, newt);
+         return bf.newDefaultBag(result);
+     }
+-
+-    // if the dimension values contain null then replace it with "unknown" value
+-    // since null will be used for rollups
+-    public static void convertNullToUnknown(Tuple tuple) throws ExecException {
+-	int idx = 0;
+-	for(Object obj : tuple.getAll()) {
+-	    if( (obj == null) ) {
+-		tuple.set(idx, unknown);
+-	    }
+-	    idx++;
+-	}
+-    }
+-    
++   
+     private void recursivelyCube(List<Tuple> result, Tuple input, int index, Tuple newt) throws ExecException {
+         newt.set(index, input.get(index));
+         if (index == input.size() - 1 ) {
+@@ -126,4 +114,13 @@ public class CubeDimensions extends EvalFunc<DataBag> {
+             throw new RuntimeException(e);
+         }
+     }
++
++    public List<Tuple> getLattice(List<String> dimensions) throws ExecException {
++	List<Tuple> lattice = Lists.newArrayListWithCapacity((int) Math.pow(2, dimensions.size()));
++	Tuple tuple = tf.newTuple(dimensions);
++	Tuple newt = tf.newTuple(tuple.size());
++	recursivelyCube(lattice, tuple, 0, newt);
++	return lattice;
++    }
++
+ }
+diff --git src/org/apache/pig/builtin/PigStorage.java src/org/apache/pig/builtin/PigStorage.java
+index 21e835f..af15e52 100644
+--- src/org/apache/pig/builtin/PigStorage.java
++++ src/org/apache/pig/builtin/PigStorage.java
+@@ -131,6 +131,9 @@ LoadPushDown, LoadMetadata, StoreMetadata {
+     private ArrayList<Object> mProtoTuple = null;
+     private TupleFactory mTupleFactory = TupleFactory.getInstance();
+     private String loadLocation;
++    
++    // To store the raw bytes of a tuple
++    private long rawTupleSize;
+ 
+     boolean isSchemaOn = false;
+     boolean dontLoadSchema = false;
+@@ -225,6 +228,7 @@ LoadPushDown, LoadMetadata, StoreMetadata {
+             Text value = (Text) in.getCurrentValue();
+             byte[] buf = value.getBytes();
+             int len = value.getLength();
++            setRawTupleSize(len);
+             int start = 0;
+             int fieldID = 0;
+             for (int i = 0; i < len; i++) {
+@@ -512,4 +516,12 @@ LoadPushDown, LoadMetadata, StoreMetadata {
+             Job job) throws IOException {
+ 
+     }
++
++    public long getRawTupleSize() {
++	return rawTupleSize;
++    }
++
++    public void setRawTupleSize(long rawTupleSize) {
++	this.rawTupleSize = rawTupleSize;
++    }
+ }
+diff --git src/org/apache/pig/builtin/RollupDimensions.java src/org/apache/pig/builtin/RollupDimensions.java
+index f6c26e4..47c67fb 100644
+--- src/org/apache/pig/builtin/RollupDimensions.java
++++ src/org/apache/pig/builtin/RollupDimensions.java
+@@ -30,6 +30,7 @@ import org.apache.pig.data.TupleFactory;
+ import org.apache.pig.impl.logicalLayer.FrontendException;
+ import org.apache.pig.impl.logicalLayer.schema.Schema;
+ import org.apache.pig.impl.logicalLayer.schema.Schema.FieldSchema;
++import org.apache.pig.impl.util.Utils;
+ 
+ import com.google.common.collect.Lists;
+ 
+@@ -60,7 +61,7 @@ public class RollupDimensions extends EvalFunc<DataBag> {
+     @Override
+     public DataBag exec(Tuple tuple) throws IOException {
+ 	List<Tuple> result = Lists.newArrayListWithCapacity(tuple.size() + 1);
+-	CubeDimensions.convertNullToUnknown(tuple);
++	Utils.convertNullToUnknown(tuple);
+ 	result.add(tuple);
+ 	iterativelyRollup(result, tuple);
+ 	return bf.newDefaultBag(result);
+@@ -74,6 +75,14 @@ public class RollupDimensions extends EvalFunc<DataBag> {
+ 	}
+     }
+ 
++    public List<Tuple> getLattice(List<String> dimensions) throws ExecException {
++	List<Tuple> lattice = Lists.newArrayListWithCapacity(dimensions.size() + 1);
++	Tuple tuple = tf.newTuple(dimensions);
++	lattice.add(tuple);
++	iterativelyRollup(lattice, tuple);
++	return lattice;
++    }
++    
+     @Override
+     public Schema outputSchema(Schema input) {
+ 	// "dimensions" string is the default namespace assigned to the output
+diff --git src/org/apache/pig/impl/builtin/HolisticCube.java src/org/apache/pig/impl/builtin/HolisticCube.java
+new file mode 100644
+index 0000000..f32fac9
+--- /dev/null
++++ src/org/apache/pig/impl/builtin/HolisticCube.java
+@@ -0,0 +1,218 @@
++/*
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.apache.pig.impl.builtin;
++
++import java.io.IOException;
++import java.lang.reflect.Type;
++import java.util.ArrayList;
++import java.util.HashMap;
++import java.util.List;
++import java.util.Map;
++
++import org.apache.hadoop.conf.Configuration;
++import org.apache.pig.EvalFunc;
++import org.apache.pig.backend.hadoop.executionengine.util.MapRedUtil;
++import org.apache.pig.data.BagFactory;
++import org.apache.pig.data.DataBag;
++import org.apache.pig.data.Tuple;
++import org.apache.pig.data.TupleFactory;
++import org.apache.pig.impl.io.ReadToEndLoader;
++import org.apache.pig.impl.util.UDFContext;
++import org.apache.pig.impl.util.Utils;
++
++/**
++ * This UDF is used by cube operator for performing actual holistic cubing.
++ * It reads the annotated lattice from local cache and based on the partition
++ * factor for each region it appends algebraicAttribute%partitionfactor value
++ * to the input tuple. algebraicAttribute%partitionfactor guarantees that the
++ * splitting is algebraic.
++ * For example: for holistic measure count(distinct users) 
++ * splitting along the algebraic attribute (userid) guarantees that the same the
++ * same userid cannot be sent to two different reducers.
++ * For example: 
++ * Input tuple: (midwest,OH,1007)
++ * Annotated Lattice: {((,),5), ((region,),2), ((,state),4), ((region,state),0)}
++ * Output: {(,,2),(region,,1),(,state,3),(region,state,0)}
++ * This UDF expects the algebraic attribute as last argument of the input tuple.
++ * It assumes that last field in the input tuple is algebraic attribute. 
++ */
++
++public class HolisticCube extends EvalFunc<DataBag> {
++
++    private TupleFactory tf;
++    private BagFactory bf;
++    private List<Tuple> cl;
++    private boolean isLatticeRead;
++    private String annotatedLatticeLocation;
++    private HashMap<Tuple, Integer> aLattice;
++
++    // for debugging
++    boolean printOutputOnce = false;
++    boolean printInputOnce = false;
++
++    public HolisticCube(String[] args) {
++	this.tf = TupleFactory.getInstance();
++	this.bf = BagFactory.getInstance();
++	this.cl = new ArrayList<Tuple>();
++	stringArrToTupleList(this.cl, args);
++	this.isLatticeRead = false;
++	this.aLattice = new HashMap<Tuple, Integer>();
++	log.info("[CUBE] lattice - " + cl);
++    }
++
++    private void stringArrToTupleList(List<Tuple> cl, String[] args) {
++
++	// region labels are csv strings. if trailing values of region label
++	// are null/empty then split function ignores those values. specify some
++	// integer value greater than the number of output tokens makes sure that
++	// all null values in region label are assigned an empty string. first
++	// value which is the most detailed level in the lattice doesn't have null values
++	// so assigning the length of first value as max index
++	int maxIdx = args[0].length();
++
++	for (String arg : args) {
++	    Tuple newt = tf.newTuple();
++	    String[] tokens = arg.split(",", maxIdx);
++	    for (String token : tokens) {
++		if (token.equals("") == true) {
++		    newt.append(null);
++		} else {
++		    newt.append(token);
++		}
++	    }
++	    cl.add(newt);
++	}
++    }
++
++    /**
++     * @param in - input tuple with last field as algebraic attribute
++     * @return bag with all combinations of groups with last field
++     * as algebraicAttribute%partitionFactor to guarantee that algebraic
++     * attribute with same value does NOT go to different reducers
++     */
++    public DataBag exec(Tuple in) throws IOException {
++	if (printInputOnce == false) {
++	    log.info("[CUBE] Input - " + in);
++	    printInputOnce = true;
++	}
++
++	if (in == null || in.size() == 0) {
++	    return null;
++	}
++
++	if (isLatticeRead == false) {
++	    readAnnotatedLattice();
++	}
++	Utils.convertNullToUnknown(in);
++	List<Tuple> groups = getAllCubeCombinations(in);
++
++	if (printOutputOnce == false) {
++	    log.info("[CUBE] Output - " + bf.newDefaultBag(groups));
++	    printOutputOnce = true;
++	}
++
++	return bf.newDefaultBag(groups);
++    }
++
++    private void readAnnotatedLattice() throws IOException {
++	ReadToEndLoader loader;
++	try {
++	    Configuration udfconf = UDFContext.getUDFContext().getJobConf();
++	    annotatedLatticeLocation = udfconf.get("pig.annotatedLatticeFile", "");
++
++	    if (annotatedLatticeLocation.length() == 0) {
++		throw new RuntimeException(this.getClass().getSimpleName()
++		        + " used but no annotated lattice file found");
++	    }
++
++	    Configuration conf = new Configuration();
++
++	    // Hadoop security need this property to be set
++	    if (System.getenv("HADOOP_TOKEN_FILE_LOCATION") != null) {
++		conf.set("mapreduce.job.credentials.binary", System.getenv("HADOOP_TOKEN_FILE_LOCATION"));
++	    }
++	    if (udfconf.get("fs.file.impl") != null)
++		conf.set("fs.file.impl", udfconf.get("fs.file.impl"));
++	    if (udfconf.get("fs.hdfs.impl") != null)
++		conf.set("fs.hdfs.impl", udfconf.get("fs.hdfs.impl"));
++	    if (udfconf.getBoolean("pig.tmpfilecompression", false)) {
++		conf.setBoolean("pig.tmpfilecompression", true);
++		if (udfconf.get("pig.tmpfilecompression.codec") != null)
++		    conf.set("pig.tmpfilecompression.codec", udfconf.get("pig.tmpfilecompression.codec"));
++	    }
++	    conf.set(MapRedUtil.FILE_SYSTEM_NAME, "file:///");
++
++	    loader = new ReadToEndLoader(Utils.getTmpFileStorageObject(conf), conf, annotatedLatticeLocation, 0);
++
++	    Tuple t;
++	    while ((t = loader.getNext()) != null) {
++		log.info("[CUBE] Annotated Region: " + t.toString());
++		int paritionFactor = Integer.valueOf(t.get(1).toString());
++		aLattice.put((Tuple) t.get(0), paritionFactor);
++	    }
++
++	    // after reading annotated lattice we do not need the normal
++	    // lattice anymore
++	    isLatticeRead = true;
++	    cl = null;
++	} catch (IOException e) {
++	    throw new IOException("Error while processing annotated lattice " + annotatedLatticeLocation, e);
++	}
++    }
++
++    private List<Tuple> getAllCubeCombinations(Tuple in) throws IOException {
++	List<Tuple> result = null;
++	if (isLatticeRead == true) {
++	    result = new ArrayList<Tuple>(in.size());
++
++	    // This means the lattice has been read and annotated
++	    for (Map.Entry<Tuple, Integer> entry : aLattice.entrySet()) {
++		Tuple region = entry.getKey();
++		int pf = entry.getValue();
++
++		Tuple newt = tf.newTuple(in.getAll());
++		// input tuple will have one additional field because
++		// the algebraic attribute will also be projected (last field)
++		if (region.size() + 1 != in.size()) {
++		    throw new RuntimeException(
++			    "Number of fields in tuple should be equal to the number of fields in region tuple.");
++		}
++		for (int i = 0; i < region.size(); i++) {
++		    if (region.get(i) == null) {
++			newt.set(i, null);
++		    }
++		}
++
++		// last tuple is the algebraic attribute
++		// TODO check if it works correctly for all data types
++		// alg attr with same values should NOT go to different reducers
++		Object algAttr = newt.get(newt.size() - 1);
++		if (pf > 1) {
++		    newt.set(newt.size() - 1, algAttr.hashCode() % pf);
++		}
++
++		result.add(newt);
++	    }
++	}
++	return result;
++    }
++
++    public Type getReturnType() {
++	return DataBag.class;
++    }
++}
+diff --git src/org/apache/pig/impl/builtin/HolisticCubeCompoundKey.java src/org/apache/pig/impl/builtin/HolisticCubeCompoundKey.java
+new file mode 100644
+index 0000000..1338570
+--- /dev/null
++++ src/org/apache/pig/impl/builtin/HolisticCubeCompoundKey.java
+@@ -0,0 +1,163 @@
++/*
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.apache.pig.impl.builtin;
++
++import java.io.IOException;
++import java.lang.reflect.Type;
++import java.util.ArrayList;
++import java.util.List;
++
++import org.apache.commons.logging.Log;
++import org.apache.commons.logging.LogFactory;
++import org.apache.pig.EvalFunc;
++import org.apache.pig.data.BagFactory;
++import org.apache.pig.data.DataBag;
++import org.apache.pig.data.Tuple;
++import org.apache.pig.data.TupleFactory;
++import org.apache.pig.impl.util.Utils;
++
++/**
++ * This function is used in holistic cubing. The constructor of this class
++ * accepts cube lattice in string format. 
++ * For every received tuple it returns a bag of tuples with 3 fields
++ * 1st field - region of the tuple
++ * 2nd field - group value
++ * 3rd field - 1
++ * For example:
++ * Cube Lattice : {(region,state), (region,), (,state) (,)}
++ * Input Tuple: (midwest,OH)
++ * Output Bag: {((region,state),(midwest,OH),1), 
++ * 		((region,),(midwest,),1),
++ * 		((,state),(,OH),1),
++ * 		((,),(,),1)}
++ * NOTE: if the input tuple contain null valued fields then it will
++ * be converted to "unknown". For more information: refer cube operator
++ * documentation
++ */
++
++public class HolisticCubeCompoundKey extends EvalFunc<DataBag> {
++
++    private TupleFactory tf;
++    private BagFactory bf;
++    private Log log = LogFactory.getLog(getClass());
++    private List<Tuple> cl; // cube lattice
++
++    // for debugging
++    boolean printOutputOnce = false;
++    boolean printInputOnce = false;
++
++    public HolisticCubeCompoundKey() {
++	this(null);
++    }
++
++    public HolisticCubeCompoundKey(String[] args) {
++	tf = TupleFactory.getInstance();
++	bf = BagFactory.getInstance();
++	cl = new ArrayList<Tuple>();
++	stringArrToTupleList(cl, args);
++	log.info("[CUBE] lattice - " + cl);
++    }
++
++    private void stringArrToTupleList(List<Tuple> cl, String[] args) {
++
++	// region labels are csv strings. if trailing values of region label
++	// are null/empty then split function ignores those values. specify some
++	// integer value greater than the number of output tokens makes sure
++	// that all null values in region label are assigned an empty string. first
++	// value which is the most detailed level in the lattice doesn't have null values
++	int maxIdx = args[0].length() + 1;
++
++	for (String arg : args) {
++	    Tuple newt = tf.newTuple();
++	    String[] tokens = arg.split(",", maxIdx);
++	    for (String token : tokens) {
++		if (token.equals("") == true) {
++		    newt.append(null);
++		} else {
++		    newt.append(token);
++		}
++	    }
++	    cl.add(newt);
++	}
++    }
++
++    /**
++     * @param in - input tuple
++     * @return Bag of tuples.
++     * Each tuple have 3 fields (compound keys) 
++     * 1 - primary key - region label 
++     * 2 - secondary key - group value corresponding to region 
++     * 3 - value - 1
++     */
++    public DataBag exec(Tuple in) throws IOException {
++	if (printInputOnce == false) {
++	    log.info("[CUBE] Input - " + in);
++	    printInputOnce = true;
++	}
++
++	if (in == null || in.size() == 0) {
++	    return null;
++	}
++
++	// null fields in the input tuple will be converted to "unknown"
++	Utils.convertNullToUnknown(in);
++	List<Tuple> groups = getAllCubeCombinations(in);
++	List<Tuple> results = new ArrayList<Tuple>(cl.size());
++
++	for (int i = 0; i < groups.size(); i++) {
++	    Tuple t = tf.newTuple(3);
++	    t.set(0, cl.get(i));
++	    t.set(1, groups.get(i));
++	    t.set(2, (long) 1);
++	    results.add(t);
++	}
++
++	if (printOutputOnce == false) {
++	    log.info("[CUBE] Output - " + bf.newDefaultBag(results));
++	    printOutputOnce = true;
++	}
++
++	return bf.newDefaultBag(results);
++    }
++
++    private List<Tuple> getAllCubeCombinations(Tuple in) throws IOException {
++	if (cl == null || cl.size() == 0) {
++	    throw new RuntimeException("Lattice cannot be null or empty.");
++	}
++
++	List<Tuple> result = new ArrayList<Tuple>(in.size());
++	for (Tuple region : cl) {
++	    Tuple newt = tf.newTuple(in.getAll());
++	    if (region.size() != in.size()) {
++		throw new RuntimeException(
++		        "Number of fields in tuple should be equal to the number of fields in region tuple.");
++	    }
++	    for (int i = 0; i < region.size(); i++) {
++		if (region.get(i) == null) {
++		    newt.set(i, null);
++		}
++	    }
++	    result.add(newt);
++	}
++	return result;
++    }
++
++    public Type getReturnType() {
++	return DataBag.class;
++    }
++}
+diff --git src/org/apache/pig/impl/builtin/PartitionMaxGroup.java src/org/apache/pig/impl/builtin/PartitionMaxGroup.java
+new file mode 100644
+index 0000000..d763590
+--- /dev/null
++++ src/org/apache/pig/impl/builtin/PartitionMaxGroup.java
+@@ -0,0 +1,199 @@
++/*
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.apache.pig.impl.builtin;
++
++import java.io.IOException;
++import java.lang.reflect.Type;
++import java.util.Iterator;
++
++import org.apache.commons.logging.Log;
++import org.apache.commons.logging.LogFactory;
++import org.apache.pig.EvalFunc;
++import org.apache.pig.backend.executionengine.ExecException;
++import org.apache.pig.data.DataBag;
++import org.apache.pig.data.Tuple;
++import org.apache.pig.data.TupleFactory;
++
++/**
++ * This UDF is used by cube operator for holistic cubing.
++ * It determines the maximum size of the group within a region. 
++ * After determining the maximum size of the group it determines
++ * the partition factor for those large groups. 
++ * The input to this UDF is a bag of tuples with following fields
++ * 1st field - region label
++ * 2nd field - group value
++ * 3..nth fields - non-dimensional fields that are pushed down
++ * Example input tuple: {((city,state), (columbus,Ohio), $1000, 2012),(..),(..)}
++ * The input bag is sorted based on the group values.
++ * The output of this UDF is partition factor for the region.
++ */
++
++public class PartitionMaxGroup extends EvalFunc<Tuple> {
++
++    private Log log = LogFactory.getLog(getClass());
++    private long totalSampleCount;
++    private TupleFactory tf;
++    private long inMemTupleSize;
++    private long actualTupleSize;
++    private long overallDataSize;
++    private boolean isFirstTuple;
++    private long bytesPerReducer;
++    private double percentMemUsage;
++
++    // for debugging
++    boolean printOutputOnce = false;
++    boolean printInputOnce = false;
++
++    public PartitionMaxGroup(String[] args) {
++	tf = TupleFactory.getInstance();
++	this.totalSampleCount = 0;
++	this.overallDataSize = Long.valueOf(args[0]);
++	this.bytesPerReducer = Long.valueOf(args[1]);
++	this.actualTupleSize = Long.valueOf(args[2]);
++	this.percentMemUsage = Double.valueOf(args[3]);
++	this.inMemTupleSize = 0;
++	this.isFirstTuple = true;
++    }
++
++    /**
++     * @param in - input tuple with bag of tuples
++     * @return - tuple with partition factor for max group
++     */
++    public Tuple exec(Tuple in) throws IOException {
++	if (printInputOnce == false) {
++	    log.info("[CUBE] Input - " + in);
++	    printInputOnce = true;
++	}
++
++	if (in == null || in.size() == 0) {
++	    return null;
++	}
++
++	Tuple result = tf.newTuple(1);
++	Tuple prevGroup = null;
++	DataBag bg = (DataBag) in.get(0);
++	Iterator<Tuple> iter = bg.iterator();
++	long grpCount = 0;
++	long maxGroupSize = 0;
++	int partitionFactor = 0;
++	long firstGroupSize = 0;
++
++	while (iter.hasNext()) {
++	    Tuple tup = iter.next();
++	    Tuple currGroup = (Tuple) tup.get(1);
++	    if (prevGroup == null) {
++		prevGroup = currGroup;
++	    }
++
++	    if (isFirstTuple == true) {
++		firstGroupSize = firstGroupSize + (Long) tup.get(2);
++	    }
++	    if (currGroup.equals(prevGroup) == true) {
++		grpCount = grpCount + (Long) tup.get(2);
++	    } else {
++		if (grpCount > maxGroupSize) {
++		    maxGroupSize = grpCount;
++		}
++		grpCount = (Long) tup.get(2);
++		prevGroup = currGroup;
++	    }
++	}
++
++	// corner case: if last group is largest
++	if (grpCount > maxGroupSize) {
++	    maxGroupSize = grpCount;
++	}
++
++	if (isFirstTuple == true) {
++	    // first tuple will be the grand total <*,*,*>
++	    // whose size is equal to the total sample count
++	    totalSampleCount = firstGroupSize;
++	    isFirstTuple = false;
++	}
++
++	partitionFactor = determinePartitionFactor(maxGroupSize, in);
++	result.set(0, partitionFactor);
++
++	if (printOutputOnce == false) {
++	    log.info("[CUBE] Output tuple - " + result);
++	    printOutputOnce = true;
++	}
++	return result;
++    }
++
++    private int determinePartitionFactor(long maxGroupSize, Tuple in) throws ExecException {
++	// a region is identified reducer unfriendly if the group size is more
++	// than 0.75rN, where r is the ratio of number of tuples that a reducer
++	// can handle vs overall data size (total #rows) and N is the total sample size.
++	// This equation is taken from mr-cube paper page #6.
++	int partitionFactor = 0;
++	long heapMemAvail = (long) (bytesPerReducer * percentMemUsage);
++	long estTotalRows = overallDataSize / actualTupleSize;
++	if (inMemTupleSize == 0) {
++	    inMemTupleSize = getTupleSize(in);
++	    double r = ((double) (heapMemAvail / inMemTupleSize) / (double) estTotalRows);
++
++	    // prints for debugging purpose
++	    log.info("[CUBE] Overall data size in bytes: " + overallDataSize);
++	    log.info("[CUBE] Input bag memory size in bytes: " + in.getMemorySize());
++	    log.info("[CUBE] In-memory tuple size in bytes: " + inMemTupleSize);
++	    log.info("[CUBE] Actual tuple size in bytes: " + actualTupleSize);
++	    log.info("[CUBE] Maximum available heap memory in bytes: " + heapMemAvail);
++	    log.info("[CUBE] Estimated total number of rows in input dataset:" + estTotalRows);
++	    log.info("[CUBE] Total number of rows in sample:" + totalSampleCount);
++	    log.info("[CUBE] Max. tuples handled by reducer: " + heapMemAvail / inMemTupleSize);
++	    log.info("[CUBE] Ratio (r): " + r);
++	    log.info("[CUBE] Threshold: " + (0.75 * r * totalSampleCount));
++	}
++
++	long maxTuplesByReducer = heapMemAvail / inMemTupleSize;
++	double r = ((double) maxTuplesByReducer / (double) estTotalRows);
++	double threshold = 0.75 * r * totalSampleCount;
++	if (maxGroupSize > threshold) {
++	    partitionFactor = (int) Math.round(maxGroupSize / (r * totalSampleCount));
++
++	    log.info("[CUBE] Group size: " + maxGroupSize + " is reducer un-friendly.");
++	    log.info("[CUBE] REDUCER UN-FRIENDLY region. Partition factor: " + partitionFactor);
++	} else {
++	    log.info("[CUBE] Group size: " + maxGroupSize + " is reducer friendly.");
++	}
++	return partitionFactor;
++    }
++
++    private long getTupleSize(Tuple in) throws ExecException {
++	// input tuple is a bag with tuples having multiple fields
++	// Ex. {((city,state), (columbus,Ohio), $1000, 2012),(..),(..)}
++	// 1st field in a tuple is a tuple with region label
++	// 2nd field in a tuple is a tuple with group values
++	// 3..nth fields are the dimensions that are pushed down from input
++	// While calculating in-memory tuple size, the region label can be
++	// omitted because in the actual mr-job the region label will not sent
++	// to the reducers
++	DataBag bg = (DataBag) in.get(0);
++	Tuple tup = bg.iterator().next();
++	Tuple newTup = tf.newTuple(tup.getAll().size());
++	for (int i = 1; i < tup.getAll().size(); i++) {
++	    newTup.set(i - 1, tup.get(i));
++	}
++	return newTup.getMemorySize();
++    }
++
++    public Type getReturnType() {
++	return Tuple.class;
++    }
++}
+diff --git src/org/apache/pig/impl/builtin/PostProcessCube.java src/org/apache/pig/impl/builtin/PostProcessCube.java
+new file mode 100644
+index 0000000..8d3a72f
+--- /dev/null
++++ src/org/apache/pig/impl/builtin/PostProcessCube.java
+@@ -0,0 +1,111 @@
++/*
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.apache.pig.impl.builtin;
++
++import java.io.IOException;
++import java.lang.reflect.Type;
++import java.util.ArrayList;
++import java.util.Iterator;
++import java.util.List;
++
++import org.apache.pig.EvalFunc;
++import org.apache.pig.data.BagFactory;
++import org.apache.pig.data.DataBag;
++import org.apache.pig.data.Tuple;
++import org.apache.pig.data.TupleFactory;
++
++/**
++ * This UDF is used by Cube operator for holistic cubing.
++ * It strips off the bin number value that is inserted
++ * into each tuples. The map job of full holistic cube job
++ * appends bin number (algebraicAttribute%partitionFactor) to the end of
++ * key and to the end of dimensional list inside values. This
++ * value is inserted by the map job to make sure algebraic attributes
++ * with same values goes to the same reducer.
++ * 
++ * For example: 
++ * Input tuple: ((midwest,OH,2),{(midwest,OH,2,1007,1986,$10000),(midwest,OH,2,1007,1987,$20000)})
++ * Output tuple: ((midwest,OH),{(midwest,OH,1007,1986,$10000),(midwest,OH,1007,1987,$20000)})
++ *  
++ */
++
++public class PostProcessCube extends EvalFunc<Tuple> {
++
++    private TupleFactory tf;
++    private BagFactory bf;
++
++    // for debugging
++    boolean printOutputOnce = false;
++    boolean printInputOnce = false;
++
++    public PostProcessCube() {
++	this.tf = TupleFactory.getInstance();
++	this.bf = BagFactory.getInstance();
++    }
++    
++    /**
++     * @param in - input tuple with first field as tuple and second field as bag
++     * The input tuple is from POPackage operator.
++     * @return tuple with algebraicAttribute%patitionFactor value stripped off
++     */
++    public Tuple exec(Tuple in) throws IOException {
++	if (printInputOnce == false) {
++	    log.info("[CUBE] Input group: " + in.get(0) + " Bag size: " + ((DataBag)in.get(1)).size());
++	    printInputOnce = true;
++	}
++
++	Tuple keyTuple = (Tuple) in.get(0);
++
++	Tuple key = tf.newTuple(keyTuple.size() - 1);
++	for (int i = 0; i < keyTuple.size() - 1; i++) {
++	    key.set(i, keyTuple.get(i));
++	}
++	in.set(0, key);
++
++	DataBag valueBag = (DataBag) in.get(1);
++	int vpField = keyTuple.size() - 1;
++
++	Iterator<Tuple> iter = valueBag.iterator();
++	List<Tuple> resultBag = new ArrayList<Tuple>();
++	while (iter.hasNext()) {
++	    Tuple tup = iter.next();
++	    Tuple newt = tf.newTuple(tup.size() - 1);
++	    int idx = 0;
++	    // We copy all the fields except the field
++	    // with value partition
++	    for (int i = 0; i < tup.size(); i++) {
++		if (i != vpField) {
++		    newt.set(idx, tup.get(i));
++		    idx++;
++		}
++	    }
++	    resultBag.add(newt);
++	}
++	in.set(1, bf.newDefaultBag(resultBag));
++
++	if (printOutputOnce == false) {
++	    log.info("[CUBE] Output group: " + in.get(0));
++	    printOutputOnce = true;
++	}
++	return in;
++    }
++
++    public Type getReturnType() {
++	return Tuple.class;
++    }
++}
+diff --git src/org/apache/pig/impl/io/ReadSingleLoader.java src/org/apache/pig/impl/io/ReadSingleLoader.java
+new file mode 100644
+index 0000000..7fa9021
+--- /dev/null
++++ src/org/apache/pig/impl/io/ReadSingleLoader.java
+@@ -0,0 +1,288 @@
++/*
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.apache.pig.impl.io;
++
++import java.io.IOException;
++import java.util.ArrayList;
++import java.util.List;
++
++import org.apache.hadoop.conf.Configuration;
++import org.apache.hadoop.mapreduce.InputFormat;
++import org.apache.hadoop.mapreduce.InputSplit;
++import org.apache.hadoop.mapreduce.Job;
++import org.apache.hadoop.mapreduce.JobContext;
++import org.apache.hadoop.mapreduce.JobID;
++import org.apache.hadoop.mapreduce.RecordReader;
++import org.apache.hadoop.mapreduce.TaskAttemptContext;
++import org.apache.hadoop.mapreduce.TaskAttemptID;
++import org.apache.pig.Expression;
++import org.apache.pig.LoadFunc;
++import org.apache.pig.LoadMetadata;
++import org.apache.pig.ResourceSchema;
++import org.apache.pig.ResourceStatistics;
++import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.PigSplit;
++import org.apache.pig.backend.hadoop.executionengine.shims.HadoopShims;
++import org.apache.pig.builtin.PigStorage;
++import org.apache.pig.data.Tuple;
++import org.apache.pig.impl.plan.OperatorKey;
++
++/**
++ * This Loader is used by Holistic Cube Job for getting the raw tuple size. When getRawTupleSize() method is called one
++ * tuple is read using PisTorage and the number of bytes read is returned. NOTE: Currently this works only for
++ * PigStorage. If other storage backends are used like HBaseStorage/AvroStorage then InterStorage should provide support
++ * for returning the raw bytes of a tuple.
++ */
++public class ReadSingleLoader extends LoadFunc implements LoadMetadata {
++
++    /**
++     * the wrapped LoadFunc which will do the actual reading
++     */
++    private LoadFunc wrappedLoadFunc;
++
++    /**
++     * the Configuration object used to locate the input location - this will be used to call
++     * {@link LoadFunc#setLocation(String, Job)} on the wrappedLoadFunc
++     */
++    private Configuration conf;
++
++    /**
++     * the input location string (typically input file/dir name )
++     */
++    private String inputLocation;
++
++    /**
++     * If the splits to be read are not in increasing sequence of integers this array can be used
++     */
++    private int[] toReadSplits = null;
++
++    /**
++     * index into toReadSplits
++     */
++    private int toReadSplitsIdx = 0;
++
++    /**
++     * the index of the split the loader is currently reading from
++     */
++    private int curSplitIndex;
++
++    /**
++     * the input splits returned by underlying {@link InputFormat#getSplits(JobContext)}
++     */
++    private List<InputSplit> inpSplits = null;
++
++    /**
++     * underlying RecordReader
++     */
++    private RecordReader reader = null;
++
++    /**
++     * underlying InputFormat
++     */
++    private InputFormat inputFormat = null;
++
++    /**
++     * @param wrappedLoadFunc
++     * @param conf
++     * @param inputLocation
++     * @param splitIndex
++     * @throws IOException
++     * @throws InterruptedException
++     */
++    public ReadSingleLoader(LoadFunc wrappedLoadFunc, Configuration conf, String inputLocation, int splitIndex)
++	    throws IOException {
++	this.wrappedLoadFunc = wrappedLoadFunc;
++	this.inputLocation = inputLocation;
++	this.conf = conf;
++	this.curSplitIndex = splitIndex;
++	init();
++    }
++
++    /**
++     * This constructor takes an array of split indexes (toReadSplitIdxs) of the splits to be read.
++     * 
++     * @param wrappedLoadFunc
++     * @param conf
++     * @param inputLocation
++     * @param toReadSplitIdxs
++     * @throws IOException
++     * @throws InterruptedException
++     */
++    public ReadSingleLoader(LoadFunc wrappedLoadFunc, Configuration conf, String inputLocation, int[] toReadSplitIdxs)
++	    throws IOException {
++	this.wrappedLoadFunc = wrappedLoadFunc;
++	this.inputLocation = inputLocation;
++	this.toReadSplits = toReadSplitIdxs;
++	this.conf = conf;
++	this.curSplitIndex = toReadSplitIdxs.length > 0 ? toReadSplitIdxs[0] : Integer.MAX_VALUE;
++	init();
++    }
++
++    @SuppressWarnings("unchecked")
++    private void init() throws IOException {
++	// make a copy so that if the underlying InputFormat writes to the
++	// conf, we don't affect the caller's copy
++	conf = new Configuration(conf);
++	// let's initialize the wrappedLoadFunc
++	Job job = new Job(conf);
++	wrappedLoadFunc.setLocation(inputLocation, job);
++	// The above setLocation call could write to the conf within
++	// the job - get a hold of the modified conf
++	conf = job.getConfiguration();
++	inputFormat = wrappedLoadFunc.getInputFormat();
++	try {
++	    inpSplits = inputFormat.getSplits(HadoopShims.createJobContext(conf, new JobID()));
++	} catch (InterruptedException e) {
++	    throw new IOException(e);
++	}
++    }
++
++    private boolean initializeReader() throws IOException, InterruptedException {
++	if (curSplitIndex > inpSplits.size() - 1) {
++	    // past the last split, we are done
++	    return false;
++	}
++	if (reader != null) {
++	    reader.close();
++	}
++	InputSplit curSplit = inpSplits.get(curSplitIndex);
++	TaskAttemptContext tAContext = HadoopShims.createTaskAttemptContext(conf, new TaskAttemptID());
++	reader = inputFormat.createRecordReader(curSplit, tAContext);
++	reader.initialize(curSplit, tAContext);
++	// create a dummy pigsplit - other than the actual split, the other
++	// params are really not needed here where we are just reading the
++	// input completely
++	PigSplit pigSplit = new PigSplit(new InputSplit[] { curSplit }, -1, new ArrayList<OperatorKey>(), -1);
++	wrappedLoadFunc.prepareToRead(reader, pigSplit);
++	return true;
++    }
++
++    // Reads a tuple and returns the raw bytes read
++    // FIXME: currently works only for PigStorage
++    // Provide support for n random samples and returning
++    // the average bytes read.
++    public long getRawTupleSize() throws IOException {
++	long size = -1;
++	try {
++	    Tuple t = null;
++	    if (reader == null) {
++		// first call will initailize reader
++		getNextHelper();
++		size = ((PigStorage) wrappedLoadFunc).getRawTupleSize();
++		return size;
++	    } else {
++		// we already have a reader initialized
++		t = wrappedLoadFunc.getNext();
++		if (t != null) {
++		    size = ((PigStorage) wrappedLoadFunc).getRawTupleSize();
++		    return size;
++		}
++		// if loadfunc returned null, we need to read next split
++		// if there is one
++		updateCurSplitIndex();
++		getNextHelper();
++		size = ((PigStorage) wrappedLoadFunc).getRawTupleSize();
++		return size;
++	    }
++	} catch (InterruptedException e) {
++	    throw new IOException(e);
++	} catch (ClassCastException e) {
++	    // FIXME: what to do if PigStorage type casting fails?
++	    throw new IOException("Failed casting to PigStorage. Raw tuple size is supported only in PigStorage.", e);
++	}
++
++    }
++
++    private Tuple getNextHelper() throws IOException, InterruptedException {
++	Tuple t = null;
++	while (initializeReader()) {
++	    t = wrappedLoadFunc.getNext();
++	    if (t == null) {
++		// try next split
++		updateCurSplitIndex();
++	    } else {
++		return t;
++	    }
++	}
++	return null;
++    }
++
++    /**
++     * Updates curSplitIndex , just increment if splitIndexes is null, else get next split in splitIndexes
++     */
++    private void updateCurSplitIndex() {
++	if (toReadSplits == null) {
++	    ++curSplitIndex;
++	} else {
++	    ++toReadSplitsIdx;
++	    if (toReadSplitsIdx >= toReadSplits.length) {
++		// finished all the splits in splitIndexes array
++		curSplitIndex = Integer.MAX_VALUE;
++	    } else {
++		curSplitIndex = toReadSplits[toReadSplitsIdx];
++	    }
++	}
++    }
++
++    @Override
++    public ResourceSchema getSchema(String location, Job job) throws IOException {
++	// TODO Auto-generated method stub
++	return null;
++    }
++
++    @Override
++    public ResourceStatistics getStatistics(String location, Job job) throws IOException {
++	// TODO Auto-generated method stub
++	return null;
++    }
++
++    @Override
++    public String[] getPartitionKeys(String location, Job job) throws IOException {
++	// TODO Auto-generated method stub
++	return null;
++    }
++
++    @Override
++    public void setPartitionFilter(Expression partitionFilter) throws IOException {
++	// TODO Auto-generated method stub
++
++    }
++
++    @Override
++    public void setLocation(String location, Job job) throws IOException {
++	// TODO Auto-generated method stub
++
++    }
++
++    @Override
++    public InputFormat getInputFormat() throws IOException {
++	// TODO Auto-generated method stub
++	return null;
++    }
++
++    @Override
++    public void prepareToRead(RecordReader reader, PigSplit split) throws IOException {
++	// TODO Auto-generated method stub
++
++    }
++
++    @Override
++    public Tuple getNext() throws IOException {
++	// TODO Auto-generated method stub
++	return null;
++    }
++}
+diff --git src/org/apache/pig/impl/util/Utils.java src/org/apache/pig/impl/util/Utils.java
+index 270cb6a..13c0462 100644
+--- src/org/apache/pig/impl/util/Utils.java
++++ src/org/apache/pig/impl/util/Utils.java
+@@ -17,7 +17,6 @@
+  */
+ package org.apache.pig.impl.util;
+ 
+-import java.io.ByteArrayInputStream;
+ import java.io.File;
+ import java.io.FileInputStream;
+ import java.io.FileNotFoundException;
+@@ -51,7 +50,6 @@ import org.apache.pig.impl.io.ReadToEndLoader;
+ import org.apache.pig.impl.io.TFileStorage;
+ import org.apache.pig.impl.logicalLayer.schema.Schema;
+ import org.apache.pig.impl.logicalLayer.schema.Schema.FieldSchema;
+-import org.apache.pig.newplan.logical.Util;
+ import org.apache.pig.newplan.logical.relational.LogicalSchema;
+ import org.apache.pig.parser.ParserException;
+ import org.apache.pig.parser.QueryParserDriver;
+@@ -332,4 +330,18 @@ public class Utils {
+         }
+     }
+ 
++    /**
++     * Convert the null values in tuple to "unknown" since null will be used for rollups. 
++     * Used by Cube related UDFs
++     */
++    public static void convertNullToUnknown(Tuple in) throws IOException {
++	int idx = 0;
++	for (Object obj : in.getAll()) {
++	    if ((obj == null)) {
++		in.set(idx, "unknown");
++	    }
++	    idx++;
++	}
++    }
++
+ }
+diff --git src/org/apache/pig/newplan/logical/optimizer/LogicalPlanPrinter.java src/org/apache/pig/newplan/logical/optimizer/LogicalPlanPrinter.java
+index 13439c6..581f231 100644
+--- src/org/apache/pig/newplan/logical/optimizer/LogicalPlanPrinter.java
++++ src/org/apache/pig/newplan/logical/optimizer/LogicalPlanPrinter.java
+@@ -31,6 +31,7 @@ import org.apache.pig.newplan.OperatorPlan;
+ import org.apache.pig.newplan.PlanVisitor;
+ import org.apache.pig.newplan.logical.expression.LogicalExpressionPlan;
+ import org.apache.pig.newplan.logical.relational.LOCogroup;
++import org.apache.pig.newplan.logical.relational.LOCube;
+ import org.apache.pig.newplan.logical.relational.LOFilter;
+ import org.apache.pig.newplan.logical.relational.LOForEach;
+ import org.apache.pig.newplan.logical.relational.LOGenerate;
+@@ -172,6 +173,9 @@ public class LogicalPlanPrinter extends PlanVisitor {
+         else if(node instanceof LOForEach){
+             sb.append(planString(((LOForEach)node).getInnerPlan()));        
+         }
++        else if (node instanceof LOCube) {
++	    sb.append(planString(null));
++	}
+         else if(node instanceof LOCogroup){
+             MultiMap<Integer, LogicalExpressionPlan> plans = ((LOCogroup)node).getExpressionPlans();
+             for (int i : plans.keySet()) {
+diff --git src/org/apache/pig/newplan/logical/relational/LOCube.java src/org/apache/pig/newplan/logical/relational/LOCube.java
+index b262efb..448166f 100644
+--- src/org/apache/pig/newplan/logical/relational/LOCube.java
++++ src/org/apache/pig/newplan/logical/relational/LOCube.java
+@@ -18,13 +18,13 @@
+ 
+ package org.apache.pig.newplan.logical.relational;
+ 
+-import java.util.Collection;
++import java.util.HashMap;
+ import java.util.List;
++import java.util.Map;
+ 
+ import org.apache.pig.impl.logicalLayer.FrontendException;
+ import org.apache.pig.impl.util.MultiMap;
+ import org.apache.pig.newplan.Operator;
+-import org.apache.pig.newplan.OperatorPlan;
+ import org.apache.pig.newplan.PlanVisitor;
+ import org.apache.pig.newplan.logical.expression.LogicalExpressionPlan;
+ 
+@@ -45,9 +45,8 @@ import org.apache.pig.newplan.logical.expression.LogicalExpressionPlan;
+  * 
+  * </p>
+  * <p>
+- * The cube computation and rollup computation using UDFs
+- * {@link org.apache.pig.builtin.CubeDimensions} and
+- * {@link org.apache.pig.builtin.RollupDimensions} can be represented like below
++ * The cube computation and rollup computation using UDFs {@link org.apache.pig.builtin.CubeDimensions} and
++ * {@link org.apache.pig.builtin.RollupDimensions} can now be represented like below
+  * 
+  * <pre>
+  * {@code
+@@ -59,45 +58,58 @@ import org.apache.pig.newplan.logical.expression.LogicalExpressionPlan;
+  * }
+  * </pre>
+  * 
+- * In the above example, CUBE(lang, event) will generate all combinations of
+- * aggregations {(lang, event), (lang, ), ( , event), ( , )}. 
+- * For n dimensions, 2^n combinations of aggregations will be generated.
++ * In the above example, CUBE(lang, event) will generate all combinations of aggregations {(lang,event), (lang,),
++ * (,event), (,)}. For n dimensions, 2^n combinations of aggregations will be generated.
+  * 
+- * Similarly, ROLLUP(app_id, event_id) will generate aggregations from the most
+- * detailed to the most general (grandtotal) level in the hierarchical order
+- * like {(app_id, event_id), (app_id, ), ( , )}. For n dimensions,
+- * n+1 combinations of aggregations will be generated.
++ * Similarly, ROLLUP(app_id, event_id) will generate aggregations from the most detailed to the most general
++ * (grandtotal) level in the hierarchical order like {(app_id,event_id), (app_id,), (,)}. For n dimensions, n+1
++ * combinations of aggregations will be generated.
+  * 
+- * The output of the above example query will have the following combinations of
+- * aggregations {(lang, event, app_id, event_id), (lang, , app_id, event_id), 
+- * ( , event, app_id, event_id), ( , , app_id, event_id), (lang, event, app_id, ), 
+- * (lang, , app_id, ), ( , event, app_id, ), ( , , app_id, ), (lang, event, , ), 
+- * (lang, , , ), ( , event, , ), ( , , , )}
++ * The output of the above example will have the following combinations of aggregations {(lang, event, app_id,
++ * event_id), (lang, , app_id, event_id), (, event, app_id, event_id), (, , app_id, event_id), (lang, event, app_id, ),
++ * (lang, , app_id, ), (, event, app_id, ), (, , app_id, ), (lang, event, , ), (lang, , , ), (, event, , ), (, , , ),}
+  * 
+  * Total number of combinations will be ( 2^n * (n+1) )
+- * 
+- * Since cube and rollup clause use null to represent "all" values of a dimension, 
+- * if the dimension values contain null values it will be converted to "unknown" 
+- * before computing cube or rollup. 
+  * </p>
+  */
+ public class LOCube extends LogicalRelationalOperator {
++    public static final String CUBE_OP = "CUBE";
++    public static final String ROLLUP_OP = "ROLLUP";
+     private MultiMap<Integer, LogicalExpressionPlan> mExpressionPlans;
+     private List<String> operations;
++    private MultiMap<Integer, String> dimensions;
++    private String algebraicAttr;
++    private int algebraicAttrCol;
+ 
+-    public LOCube(LogicalPlan plan) {
+-	super("LOCube", plan);
+-    }
++    /*
++     * This is a map storing Uids which have been generated for an input This map is required to make the uids
++     * persistant between calls of resetSchema and getSchema
++     */
++    private Map<Integer, Long> generatedInputUids = new HashMap<Integer, Long>();
+ 
+-    public LOCube(OperatorPlan plan, MultiMap<Integer, LogicalExpressionPlan> expressionPlans) {
++    public LOCube(LogicalPlan plan) {
+ 	super("LOCube", plan);
+-	this.mExpressionPlans = expressionPlans;
+     }
+ 
+     @Override
+     public LogicalSchema getSchema() throws FrontendException {
+-	// TODO: implement when physical operator for CUBE is implemented
+-	return null;
++	// if schema is calculated before, just return
++	if (schema != null) {
++	    return schema;
++	}
++
++	// just return the immediate predecessor's schema
++	List<Operator> preds = plan.getPredecessors(this);
++	schema = null;
++	if (preds != null) {
++	    for (Operator pred : preds) {
++		if (pred instanceof LOCogroup) {
++		    schema = ((LogicalRelationalOperator) pred).getSchema();
++		}
++	    }
++	}
++
++	return schema;
+     }
+ 
+     @Override
+@@ -112,22 +124,6 @@ public class LOCube extends LogicalRelationalOperator {
+     @Override
+     public boolean isEqual(Operator other) throws FrontendException {
+ 	try {
+-	    LOCube cube = (LOCube) other;
+-	    for (Integer key : mExpressionPlans.keySet()) {
+-		if (!cube.mExpressionPlans.containsKey(key)) {
+-		    return false;
+-		}
+-		Collection<LogicalExpressionPlan> lepList1 = mExpressionPlans.get(key);
+-		Collection<LogicalExpressionPlan> lepList2 = cube.mExpressionPlans.get(key);
+-
+-		for (LogicalExpressionPlan lep1 : lepList1) {
+-		    for (LogicalExpressionPlan lep2 : lepList2) {
+-			if (!lep1.isEqual(lep2)) {
+-			    return false;
+-			}
+-		    }
+-		}
+-	    }
+ 	    return checkEquality((LogicalRelationalOperator) other);
+ 	} catch (ClassCastException cce) {
+ 	    throw new FrontendException("Exception while casting CUBE operator", cce);
+@@ -144,13 +140,29 @@ public class LOCube extends LogicalRelationalOperator {
+ 
+     @Override
+     public void resetUid() {
+-	// TODO: implement when physical operator for CUBE is implemented
++	generatedInputUids = new HashMap<Integer, Long>();
+     }
+ 
+     public List<Operator> getInputs(LogicalPlan plan) {
+ 	return plan.getPredecessors(this);
+     }
+ 
++    public String getAlgebraicAttr() {
++	return algebraicAttr;
++    }
++
++    public void setAlgebraicAttr(String algebraicAttr) {
++	this.algebraicAttr = algebraicAttr;
++    }
++
++    public MultiMap<Integer, String> getDimensions() {
++	return dimensions;
++    }
++
++    public void setDimensions(MultiMap<Integer, String> dimensions) {
++	this.dimensions = dimensions;
++    }
++
+     public List<String> getOperations() {
+ 	return operations;
+     }
+@@ -158,4 +170,12 @@ public class LOCube extends LogicalRelationalOperator {
+     public void setOperations(List<String> operations) {
+ 	this.operations = operations;
+     }
++
++    public int getAlgebraicAttrCol() {
++	return algebraicAttrCol;
++    }
++
++    public void setAlgebraicAttrCol(int algebraicAttrCol) {
++	this.algebraicAttrCol = algebraicAttrCol;
++    }
+ }
+diff --git src/org/apache/pig/newplan/logical/relational/LogToPhyTranslationVisitor.java src/org/apache/pig/newplan/logical/relational/LogToPhyTranslationVisitor.java
+index 127ab7a..e85126e 100644
+--- src/org/apache/pig/newplan/logical/relational/LogToPhyTranslationVisitor.java
++++ src/org/apache/pig/newplan/logical/relational/LogToPhyTranslationVisitor.java
+@@ -21,6 +21,7 @@ import java.io.IOException;
+ import java.util.ArrayList;
+ import java.util.Arrays;
+ import java.util.HashMap;
++import java.util.Iterator;
+ import java.util.List;
+ import java.util.Map;
+ import java.util.Stack;
+@@ -40,6 +41,7 @@ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.expressionOpe
+ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PhysicalPlan;
+ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POCollectedGroup;
+ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POCross;
++import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POCube;
+ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.PODistinct;
+ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POFRJoin;
+ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POFilter;
+@@ -59,6 +61,8 @@ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOpe
+ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POStore;
+ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POStream;
+ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POUnion;
++import org.apache.pig.builtin.CubeDimensions;
++import org.apache.pig.builtin.RollupDimensions;
+ import org.apache.pig.data.DataType;
+ import org.apache.pig.data.SchemaTupleClassGenerator.GenContext;
+ import org.apache.pig.data.SchemaTupleFrontend;
+@@ -89,6 +93,7 @@ import org.apache.pig.newplan.logical.Util;
+ import org.apache.pig.newplan.logical.expression.ExpToPhyTranslationVisitor;
+ import org.apache.pig.newplan.logical.expression.LogicalExpressionPlan;
+ import org.apache.pig.newplan.logical.expression.ProjectExpression;
++import org.apache.pig.newplan.logical.expression.UserFuncExpression;
+ import org.apache.pig.parser.SourceLocation;
+ 
+ public class LogToPhyTranslationVisitor extends LogicalRelationalNodesVisitor {
+@@ -1272,6 +1277,310 @@ public class LogToPhyTranslationVisitor extends LogicalRelationalNodesVisitor {
+     }
+ 
+     @Override
++    public void visit(LOCube loCube) throws FrontendException {
++	boolean isHolistic = false;
++	boolean isCountDistinct = false;
++	boolean isTopK = false;
++	String scope = DEFAULT_SCOPE;
++	POCube poCube = new POCube(new OperatorKey(scope, nodeGen.getNextNodeId(scope)),
++	        loCube.getRequestedParallelism());
++	poCube.addOriginalLocation(loCube.getAlias(), loCube.getLocation());
++	poCube.setResultType(DataType.TUPLE);
++	currentPlan.add(poCube);
++	logToPhyMap.put(loCube, poCube);
++
++	Operator op = loCube.getPlan().getPredecessors(loCube).get(0);
++
++	isHolistic = detectCountDistinct(loCube);
++	// we just need to see if atleast one holistic measure is found
++	// to perform mr-cube
++	if (isHolistic != true) {
++	    isHolistic = detectTopK(loCube);
++	    if (isHolistic == true) {
++		isTopK = true;
++	    }
++	} else {
++	    isCountDistinct = true;
++	}
++
++	if (isHolistic) {
++	    poCube.setHolistic(isHolistic);
++	    if (loCube.getAlgebraicAttr() != null) {
++		poCube.setAlgebraicAttr(loCube.getAlgebraicAttr());
++	    } else {
++		// FIXME what to do if algebraic attribute cannot be determined automatically?
++		// Provide support for user hinting the algebraic attribute.
++	    }
++	    List<Tuple> lattice = computeOverallCubeLattice(loCube.getOperations(), loCube.getDimensions());
++	    poCube.setCubeLattice(lattice);
++	}
++
++	if (isCountDistinct == true) {
++	    poCube.setHolisticMeasure(POCube.HOLISTIC_COUNT_DISTINCT);
++	} else if (isTopK == true) {
++	    poCube.setHolisticMeasure(POCube.HOLISTIC_TOPK);
++	}
++
++	PhysicalOperator from = logToPhyMap.get(op);
++	try {
++	    currentPlan.connect(from, poCube);
++	} catch (PlanException e) {
++	    int errCode = 2015;
++	    String msg = "Invalid physical operators in the physical plan";
++	    throw new LogicalToPhysicalTranslatorException(msg, errCode, PigException.BUG, e);
++	}
++    }
++
++    // This method computes the overall combined cube lattice. The lattice generated from independent CUBE/ROLLUP
++    // clauses will be combined together.
++    private List<Tuple> computeOverallCubeLattice(List<String> operations, MultiMap<Integer, String> dimensions)
++	    throws LogicalToPhysicalTranslatorException {
++	List<Tuple> result = new ArrayList<Tuple>();
++	CubeDimensions cd = new CubeDimensions();
++	RollupDimensions rd = new RollupDimensions();
++	for (int i = 0; i < operations.size(); i++) {
++	    String op = operations.get(i);
++	    List<String> dim = dimensions.get(i);
++	    List<Tuple> temp = new ArrayList<Tuple>();
++	    try {
++		if (op.equals(LOCube.CUBE_OP)) {
++		    temp = cd.getLattice(dim);
++		} else if (op.equals(LOCube.ROLLUP_OP)) {
++		    temp = rd.getLattice(dim);
++		}
++	    } catch (ExecException e) {
++		int errCode = 2015;
++		String msg = "Failed to generate Cube Lattice";
++		throw new LogicalToPhysicalTranslatorException(msg, errCode, PigException.BUG, e);
++	    }
++	    combineLattices(result, temp);
++	}
++	return result;
++    }
++
++    private void combineLattices(List<Tuple> result, List<Tuple> temp) {
++	if (result.size() == 0) {
++	    result.addAll(temp);
++	} else {
++	    List<Tuple> clattice = new ArrayList<Tuple>();
++	    for (int i = 0; i < result.size(); i++) {
++		for (int j = 0; j < temp.size(); j++) {
++		    clattice.add(combineTuples(result.get(i), temp.get(j)));
++		}
++	    }
++	    result.clear();
++	    result.addAll(clattice);
++	}
++    }
++
++    private Tuple combineTuples(Tuple ftup, Tuple ntup) {
++	Tuple result = TupleFactory.getInstance().newTuple(ftup.getAll());
++	for (Object field : ntup.getAll()) {
++	    result.append(field);
++	}
++
++	return result;
++    }
++
++    // This method scans the entire plan to determine if COUNT + DISTINCT combination
++    // of measure occurs.
++    // As an optimization algebraic attribute finding is also added to this function.
++    private boolean detectCountDistinct(LOCube loCube) throws FrontendException {
++	boolean isHolistic = false;
++	Operator succ = null;
++	try {
++	    succ = loCube.getPlan().getSuccessors(loCube).get(0);
++	} catch (NullPointerException e) {
++	    // do not proceed if there is no successor
++	    // if there is no successor to cube then
++	    // there can be no distinct operator and hence
++	    // we do not need to execute this function
++	    return false;
++	}
++
++	while (succ != null) {
++	    if (succ instanceof LOForEach) {
++		LogicalPlan innerplan = ((LOForEach) succ).getInnerPlan();
++		Iterator<Operator> iter = innerplan.getOperators();
++		String countalias = null;
++		String distalias = null;
++		while (iter.hasNext()) {
++		    Operator sink = iter.next();
++		    if (sink instanceof LOGenerate) {
++			// get userfunc expression and check if COUNT/COUNT_STAR is used
++			// if so then get the alias passed to COUNT and see if
++			// it belongs to distinct operator
++			List<LogicalExpressionPlan> oplans = ((LOGenerate) sink).getOutputPlans();
++			for (int i = 0; i < oplans.size(); i++) {
++			    List<Operator> sources = oplans.get(i).getSources();
++			    for (Operator source : sources) {
++				if (source instanceof UserFuncExpression) {
++				    if (((UserFuncExpression) source).getFuncSpec().getClassName()
++					    .equals("org.apache.pig.builtin.COUNT") == true
++					    || ((UserFuncExpression) source).getFuncSpec().getClassName()
++					            .equals("org.apache.pig.builtin.COUNT_STAR") == true) {
++					Operator ufsink = source.getPlan().getSinks().get(0);
++					try {
++					    countalias = ((ProjectExpression) ufsink).getFieldSchema().alias;
++
++					    // if LODistinct operator appeared before LOGenerate while iterating
++					    // then distalias would not be null
++					    if (distalias != null) {
++						if (countalias.equals(distalias) == true) {
++						    isHolistic = true;
++						}
++					    }
++					} catch (ClassCastException e) {
++					    int errCode = 2167;
++					    String msg = "Invalid LogicalExpression inside UDF";
++					    throw new LogicalToPhysicalTranslatorException(msg, errCode,
++						    PigException.BUG, e);
++					}
++				    }
++				}
++			    }
++			}
++		    } else if (sink instanceof LODistinct) {
++			// This happens if LODistinct operator came before LOGenerate
++			// or if UserFuncExpr doesn't contain COUNT as UDF
++			if (countalias == null) {
++			    distalias = ((LODistinct) sink).alias;
++			} else {
++			    if (((LODistinct) sink).alias.equals(countalias) == true) {
++				isHolistic = true;
++			    }
++			}
++
++			if (loCube.getAlgebraicAttr() == null) {
++			    String algAttr = null;
++			    algAttr = findAlgebraicAttribute((LODistinct) sink);
++			    loCube.setAlgebraicAttr(algAttr);
++			}
++
++		    }
++		}
++	    }
++
++	    try {
++		succ = succ.getPlan().getSuccessors(succ).get(0);
++	    } catch (NullPointerException e) {
++		// end of plan
++		succ = null;
++	    }
++	}
++
++	return isHolistic;
++    }
++
++    // finding algebraic attribute. If the distinct operator contains
++    // a projection then the projected column is the algebraic attribute.
++    // In the following query userid is projected in distinct statement
++    // a = load '/pig/data/qlog' using PigStorage(',') as
++    // (userid:int,region:chararray,state:chararray,city:chararray,queryid:int);
++    // b = cube a by cube(region,state,city);
++    // c = foreach b {
++    // dist_users = distinct cube.userid;
++    // generate flatten(group), COUNT(dist_users);};
++    private String findAlgebraicAttribute(LODistinct distinct) throws FrontendException {
++	String algAttr = null;
++	List<Operator> preds = distinct.getPlan().getPredecessors(distinct);
++	for (Operator pred : preds) {
++	    if (pred instanceof LOForEach) {
++		LogicalPlan iPlan = ((LOForEach) pred).getInnerPlan();
++		Iterator<Operator> iter = iPlan.getOperators();
++		while (iter.hasNext()) {
++		    Operator sink = iter.next();
++		    if (sink instanceof LOGenerate) {
++			// get userfunc expression and check if COUNT is used
++			// if so then get the alias passed to COUNT and see if
++			// it belongs to distinct operator
++			List<LogicalExpressionPlan> oplans = ((LOGenerate) sink).getOutputPlans();
++			for (int i = 0; i < oplans.size(); i++) {
++			    List<Operator> sources = oplans.get(i).getSources();
++			    for (Operator source : sources) {
++				if (source instanceof ProjectExpression) {
++				    algAttr = ((ProjectExpression) source).getFieldSchema().alias;
++				}
++			    }
++			}
++		    }
++		}
++	    }
++	}
++
++	return algAttr;
++    }
++
++    // This method checks if the output alias of operator using COUNT is same as the input alias TOP.
++    private boolean detectTopK(LOCube loCube) throws FrontendException {
++	boolean isHolistic = false;
++	Operator succ = null;
++	try {
++	    succ = loCube.getPlan().getSuccessors(loCube).get(0);
++	} catch (NullPointerException e) {
++	    // do not proceed if there is no successor
++	    // if there is no successor to cube then
++	    // there can be no top udf and hence
++	    // we do not need to execute this function
++	    return false;
++	}
++	String countOutAlias = null;
++	String topInAlias = null;
++	while (succ != null) {
++	    if (succ instanceof LOForEach) {
++		LogicalPlan innerplan = ((LOForEach) succ).getInnerPlan();
++		Iterator<Operator> iter = innerplan.getOperators();
++		while (iter.hasNext()) {
++		    Operator sink = iter.next();
++		    if (sink instanceof LOGenerate) {
++			List<LogicalExpressionPlan> oplans = ((LOGenerate) sink).getOutputPlans();
++			for (int i = 0; i < oplans.size(); i++) {
++			    List<Operator> sources = oplans.get(i).getSources();
++			    for (Operator source : sources) {
++				if (source instanceof UserFuncExpression) {
++				    if (((UserFuncExpression) source).getFuncSpec().getClassName()
++					    .equals("org.apache.pig.builtin.COUNT") == true
++					    || ((UserFuncExpression) source).getFuncSpec().getClassName()
++					            .equals("org.apache.pig.builtin.COUNT_STAR") == true) {
++					countOutAlias = ((LOForEach) succ).alias;
++				    } else if (((UserFuncExpression) source).getFuncSpec().getClassName()
++					    .equals("org.apache.pig.builtin.TOP") == true) {
++					List<Operator> exps = source.getPlan().getSinks();
++					// first 2 argument will be ConstantExpression
++					// last argument will be ProjectExpression
++					for (Operator exp : exps) {
++					    if (exp instanceof ProjectExpression) {
++						topInAlias = ((ProjectExpression) exp).getFieldSchema().alias;
++					    }
++					}
++				    }
++				}
++			    }
++			}
++		    }
++		}
++	    }
++
++	    try {
++		succ = succ.getPlan().getSuccessors(succ).get(0);
++	    } catch (NullPointerException e) {
++		// end of plan
++		succ = null;
++	    }
++	}
++
++	// if the alias of foreach operator containing COUNT is same as
++	// input alias of TOP then TOP-K + COUNT is holistic
++	if (countOutAlias != null && topInAlias != null) {
++	    if (countOutAlias.equals(topInAlias) == true) {
++		isHolistic = true;
++	    }
++	}
++
++	return isHolistic;
++    }
++
++    @Override
+     public void visit(LOUnion loUnion) throws FrontendException {
+         String scope = DEFAULT_SCOPE;
+         POUnion physOp = new POUnion(new OperatorKey(scope,nodeGen.getNextNodeId(scope)), loUnion.getRequestedParallelism());
+diff --git src/org/apache/pig/newplan/logical/rules/ColumnPruneHelper.java src/org/apache/pig/newplan/logical/rules/ColumnPruneHelper.java
+index 369f5c2..bb7b2cd 100644
+--- src/org/apache/pig/newplan/logical/rules/ColumnPruneHelper.java
++++ src/org/apache/pig/newplan/logical/rules/ColumnPruneHelper.java
+@@ -35,6 +35,7 @@ import org.apache.pig.newplan.logical.expression.LogicalExpressionPlan;
+ import org.apache.pig.newplan.logical.expression.ProjectExpression;
+ import org.apache.pig.newplan.logical.relational.LOCogroup;
+ import org.apache.pig.newplan.logical.relational.LOCross;
++import org.apache.pig.newplan.logical.relational.LOCube;
+ import org.apache.pig.newplan.logical.relational.LODistinct;
+ import org.apache.pig.newplan.logical.relational.LOFilter;
+ import org.apache.pig.newplan.logical.relational.LOForEach;
+@@ -343,6 +344,12 @@ public class ColumnPruneHelper {
+             distinct.annotate(INPUTUIDS, input);
+         }
+         
++	@Override
++	public void visit(LOCube cube) throws FrontendException {
++	    Set<Long> output = setOutputUids(cube);
++	    cube.annotate(INPUTUIDS, output);
++	}
++        
+         @Override
+         public void visit(LOCross cross) throws FrontendException {
+             Set<Long> output = setOutputUids(cross);
+diff --git src/org/apache/pig/parser/LogicalPlanBuilder.java src/org/apache/pig/parser/LogicalPlanBuilder.java
+index 289a76f..b08b8e2 100644
+--- src/org/apache/pig/parser/LogicalPlanBuilder.java
++++ src/org/apache/pig/parser/LogicalPlanBuilder.java
+@@ -386,17 +386,33 @@ public class LogicalPlanBuilder {
+ 
+ 	// set the expression plans for cube operator and build cube operator
+ 	op.setExpressionPlans(expressionPlans);
+-	op.setOperations(operations);
+ 	buildOp(loc, op, alias, inputAlias, null);
+ 	expandAndResetVisitor(loc, op);
+ 	try {
++	    setOpsDimensions(op, operations, expressionPlans);
+ 	    alias = convertCubeToFGPlan(loc, op, inputAlias, operations, expressionPlans);
++	    expandAndResetVisitor(loc, op);
+ 	} catch (FrontendException e) {
+ 	    throw new ParserValidationException(intStream, loc, e);
+ 	}
+ 	return alias;
+     }
+ 
++    // This method sets the cube operations sequence along with dimensions
++    private void setOpsDimensions(LOCube op, List<String> operations,
++	    MultiMap<Integer, LogicalExpressionPlan> expressionPlans) throws FrontendException {
++
++	MultiMap<Integer, String> dims = new MultiMap<Integer, String>();
++	for (int i = 0; i < operations.size(); i++) {
++	    for (LogicalExpressionPlan lep : expressionPlans.get(i)) {
++		LogicalExpression lex = (LogicalExpression) lep.getSources().get(0);
++		dims.put(i, lex.getFieldSchema().alias);
++	    }
++	}
++	op.setDimensions(dims);
++	op.setOperations(operations);
++    }
++    
+     // if multiple CUBE operations occur continuously then it can be combined
+     // together CUBE rel BY CUBE(a,b), CUBE(c,d); => CUBE rel BY CUBE(a,b,c,d)
+     private void combineCubeOperations(ArrayList<String> operations,
+@@ -409,10 +425,10 @@ public class LogicalPlanBuilder {
+ 
+ 	// scan and perform merge of column projections
+ 	for (i = 0; i < operations.size(); i++) {
+-	    if ((startIdx == -1) && (operations.get(i).equals("CUBE") == true)) {
++	    if ((startIdx == -1) && (operations.get(i).equals(LOCube.CUBE_OP) == true)) {
+ 		startIdx = i;
+ 	    } else {
+-		if (operations.get(i).equals("CUBE") == true) {
++		if (operations.get(i).equals(LOCube.CUBE_OP) == true) {
+ 		    endIdx = i;
+ 		} else {
+ 		    if (endIdx > startIdx) {
+@@ -573,7 +589,7 @@ public class LogicalPlanBuilder {
+ 
+ 	    // Create UDF with user specified dimensions
+ 	    LogicalExpressionPlan uexpPlan = new LogicalExpressionPlan();
+-	    if (operations.get(operIdx).equals("CUBE")) {
++	    if (operations.get(operIdx).equals(LOCube.CUBE_OP)) {
+ 		new UserFuncExpression(uexpPlan, new FuncSpec(CubeDimensions.class.getName()),
+ 		        lexpList);
+ 	    } else {
+@@ -633,11 +649,16 @@ public class LogicalPlanBuilder {
+ 
+ 	// build group by operator
+ 	try {
+-	    return buildGroupOp(loc, (LOCogroup) groupby, op.getAlias(), inpAliases, exprPlansCopy,
++	    buildGroupOp(loc, (LOCogroup) groupby, op.getAlias(), inpAliases, exprPlansCopy,
+ 		    GROUPTYPE.REGULAR, innerFlags, null);
+ 	} catch (ParserValidationException pve) {
+ 	    throw new FrontendException(pve);
+ 	}
++	
++	plan.add(op);
++	plan.connect(groupby, op);
++
++	return op.getAlias();
+     }
+ 
+     // User defined schema for generate operator. If not specified output schema
+diff --git src/org/apache/pig/pen/EquivalenceClasses.java src/org/apache/pig/pen/EquivalenceClasses.java
+index 194f8cb..a8d5e63 100644
+--- src/org/apache/pig/pen/EquivalenceClasses.java
++++ src/org/apache/pig/pen/EquivalenceClasses.java
+@@ -29,6 +29,7 @@ import java.util.Iterator;
+ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.PhysicalOperator;
+ import org.apache.pig.data.DataBag;
+ import org.apache.pig.data.Tuple;
++import org.apache.pig.newplan.logical.relational.LOCube;
+ import org.apache.pig.newplan.logical.relational.LOForEach;
+ import org.apache.pig.newplan.logical.relational.LOCross;
+ import org.apache.pig.newplan.logical.relational.LogicalRelationalOperator;
+@@ -99,6 +100,8 @@ public class EquivalenceClasses {
+                 eqClasses.add(eqClass);
+                 result.put((LogicalRelationalOperator)parent, eqClasses);
+             }
++        } else if (parent instanceof LOCube) {
++            //do nothing. Just leave the results as such
+         } else {
+             Collection<IdentityHashSet<Tuple>> eqClasses = poToEqclassesMap.get(logToPhyMap.get(parent));
+             if (eqClasses == null) {
+diff --git src/org/apache/pig/pen/LineageTrimmingVisitor.java src/org/apache/pig/pen/LineageTrimmingVisitor.java
+index 917073c..bbca5ec 100644
+--- src/org/apache/pig/pen/LineageTrimmingVisitor.java
++++ src/org/apache/pig/pen/LineageTrimmingVisitor.java
+@@ -40,6 +40,7 @@ import org.apache.pig.data.DataBag;
+ import org.apache.pig.data.Tuple;
+ import org.apache.pig.impl.PigContext;
+ import org.apache.pig.newplan.logical.relational.LOCogroup;
++import org.apache.pig.newplan.logical.relational.LOCube;
+ import org.apache.pig.newplan.logical.relational.LOJoin;
+ import org.apache.pig.newplan.logical.relational.LOCross;
+ import org.apache.pig.newplan.logical.relational.LODistinct;
+@@ -173,6 +174,12 @@ public class LineageTrimmingVisitor extends LogicalRelationalNodesVisitor {
+     }
+     
+     @Override
++    public void visit(LOCube cube) throws FrontendException {
++	if (continueTrimming)
++	    processOperator(cube);
++    }
++    
++    @Override
+     public void visit(LOStore store) throws FrontendException {
+         if (continueTrimming)
+             processOperator(store);
+diff --git src/org/apache/pig/pen/util/DisplayExamples.java src/org/apache/pig/pen/util/DisplayExamples.java
+index 265f8f7..2eaed63 100644
+--- src/org/apache/pig/pen/util/DisplayExamples.java
++++ src/org/apache/pig/pen/util/DisplayExamples.java
+@@ -32,6 +32,7 @@ import org.apache.pig.impl.logicalLayer.FrontendException;
+ import org.apache.pig.newplan.logical.relational.LOForEach;
+ import org.apache.pig.newplan.logical.relational.LogicalRelationalOperator;
+ import org.apache.pig.newplan.logical.relational.LOStore;
++import org.apache.pig.newplan.logical.relational.LOCube;
+ import org.apache.pig.newplan.logical.relational.LOLoad;
+ import org.apache.pig.newplan.logical.relational.LOLimit;
+ import org.apache.pig.newplan.logical.relational.LogicalPlan;
+@@ -111,7 +112,11 @@ public class DisplayExamples {
+             {
+                 op = op.getPlan().getSuccessors(op).get(0);
+                 bag = exampleData.get(op);
+-            }
++            } else if (op instanceof LOCube) {
++		// LOCube operator doesn't perform any operations by itself. 
++        	// so get the data from its successor and print it
++		bag = exampleData.get(op.getPlan().getPredecessors(op).get(0));
++	    }
+             try {
+                 DisplayTable(MakeArray(op, bag), op, bag, output);
+             } catch (FrontendException e) {
+diff --git test/org/apache/pig/impl/builtin/TestHolisticCubeCompundKey.java test/org/apache/pig/impl/builtin/TestHolisticCubeCompundKey.java
+new file mode 100644
+index 0000000..421a869
+--- /dev/null
++++ test/org/apache/pig/impl/builtin/TestHolisticCubeCompundKey.java
+@@ -0,0 +1,63 @@
++/*
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package org.apache.pig.impl.builtin;
++
++import static org.junit.Assert.assertEquals;
++import static org.junit.Assert.assertTrue;
++
++import java.io.IOException;
++import java.util.Set;
++
++import org.apache.pig.data.DataBag;
++import org.apache.pig.data.Tuple;
++import org.apache.pig.data.TupleFactory;
++import org.apache.pig.impl.builtin.HolisticCubeCompoundKey;
++import org.junit.Test;
++
++import com.google.common.collect.ImmutableSet;
++import com.google.common.collect.Lists;
++
++public class TestHolisticCubeCompundKey {
++
++    private static TupleFactory TF = TupleFactory.getInstance();
++
++    @Test
++    public void testHolisticCubeUDF() throws IOException {
++	Tuple t = TF.newTuple(Lists.newArrayList("a", "b", "c"));
++	Tuple t1 = TF.newTuple(Lists.newArrayList("a", "b", null));
++	Tuple t2 = TF.newTuple(Lists.newArrayList("a", null, null));
++	Tuple t3 = TF.newTuple(Lists.newArrayList(null, null, null));
++	Tuple r = TF.newTuple(Lists.newArrayList("region", "state", "city"));
++	Tuple r1 = TF.newTuple(Lists.newArrayList("region", "state", null));
++	Tuple r2 = TF.newTuple(Lists.newArrayList("region", null, null));
++	Tuple r3 = TF.newTuple(Lists.newArrayList(null, null, null));
++	Set<Tuple> expected = ImmutableSet.of(TF.newTuple(Lists.newArrayList(r, t, (long) 1)),
++	        TF.newTuple(Lists.newArrayList(r1, t1, (long) 1)), TF.newTuple(Lists.newArrayList(r2, t2, (long) 1)),
++	        TF.newTuple(Lists.newArrayList(r3, t3, (long) 1)));
++
++	String[] regions = { "region,state,city", "region,state,", "region,,", ",," };
++	HolisticCubeCompoundKey hcd = new HolisticCubeCompoundKey(regions);
++	DataBag bag = hcd.exec(t);
++	assertEquals(bag.size(), expected.size());
++
++	for (Tuple tup : bag) {
++	    assertTrue("Expected: " + expected + " Got:" + tup, expected.contains(tup));
++	}
++    }
++}
+diff --git test/org/apache/pig/impl/builtin/TestPartitionMaxGroup.java test/org/apache/pig/impl/builtin/TestPartitionMaxGroup.java
+new file mode 100644
+index 0000000..685f755
+--- /dev/null
++++ test/org/apache/pig/impl/builtin/TestPartitionMaxGroup.java
+@@ -0,0 +1,92 @@
++/*
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package org.apache.pig.impl.builtin;
++
++import static org.junit.Assert.assertTrue;
++
++import java.io.IOException;
++import java.util.ArrayList;
++import java.util.List;
++import java.util.Set;
++
++import org.apache.pig.data.BagFactory;
++import org.apache.pig.data.DataBag;
++import org.apache.pig.data.Tuple;
++import org.apache.pig.data.TupleFactory;
++import org.junit.Test;
++
++import com.google.common.collect.ImmutableSet;
++import com.google.common.collect.Lists;
++
++public class TestPartitionMaxGroup {
++
++    private static TupleFactory TF = TupleFactory.getInstance();
++    private static BagFactory BF = BagFactory.getInstance();
++
++    @Test
++    public void testHolisticCubeUDF() throws IOException {
++	List<Tuple> tupList = new ArrayList<Tuple>();
++
++	Tuple t1 = TF.newTuple();
++	t1.append(TF.newTuple(Lists.newArrayList("region", "state")));
++	t1.append(TF.newTuple(Lists.newArrayList("midwest", "OH")));
++	t1.append((long) 1);
++
++	Tuple t2 = TF.newTuple();
++	t2.append(TF.newTuple(Lists.newArrayList("region", "state")));
++	t2.append(TF.newTuple(Lists.newArrayList("midwest", "OH")));
++	t2.append((long) 1);
++
++	Tuple t3 = TF.newTuple();
++	t3.append(TF.newTuple(Lists.newArrayList("region", "state")));
++	t3.append(TF.newTuple(Lists.newArrayList("southwest", "CA")));
++	t3.append((long) 1);
++
++	Tuple t4 = TF.newTuple();
++	t4.append(TF.newTuple(Lists.newArrayList("region", "state")));
++	t4.append(TF.newTuple(Lists.newArrayList("southwest", "CA")));
++	t4.append((long) 1);
++
++	Tuple t5 = TF.newTuple();
++	t5.append(TF.newTuple(Lists.newArrayList("region", "state")));
++	t5.append(TF.newTuple(Lists.newArrayList("southwest", "CA")));
++	t5.append((long) 1);
++
++	tupList.add(t1);
++	tupList.add(t2);
++	tupList.add(t3);
++	tupList.add(t4);
++	tupList.add(t5);
++
++	DataBag bag = BF.newDefaultBag(tupList);
++	Tuple in = TF.newTuple();
++	in.append(bag);
++
++	Set<Tuple> expected = ImmutableSet.of(TF.newTuple(Lists.newArrayList((int) 20)));
++	String[] ufArgs = new String[4];
++	ufArgs[0] = "10000";
++	ufArgs[1] = "1000";
++	ufArgs[2] = "100";
++	ufArgs[3] = "1.0";
++	PartitionMaxGroup mgs = new PartitionMaxGroup(ufArgs);
++	Tuple result = mgs.exec(in);
++
++	assertTrue("Expected: " + expected + " Got:" + result, expected.contains(result));
++    }
++}
+diff --git test/org/apache/pig/impl/builtin/TestPostProcessCube.java test/org/apache/pig/impl/builtin/TestPostProcessCube.java
+new file mode 100644
+index 0000000..869bd3a
+--- /dev/null
++++ test/org/apache/pig/impl/builtin/TestPostProcessCube.java
+@@ -0,0 +1,63 @@
++/*
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package org.apache.pig.impl.builtin;
++
++import static org.junit.Assert.assertTrue;
++
++import java.io.IOException;
++
++import org.apache.pig.data.BagFactory;
++import org.apache.pig.data.DataBag;
++import org.apache.pig.data.Tuple;
++import org.apache.pig.data.TupleFactory;
++import org.junit.Test;
++
++import com.google.common.collect.Lists;
++
++public class TestPostProcessCube {
++
++    private static TupleFactory TF = TupleFactory.getInstance();
++    private static BagFactory BF = BagFactory.getInstance();
++
++    @Test
++    public void testHolisticCubeUDF() throws IOException {
++	Tuple t = TF.newTuple(Lists.newArrayList("a", "b", 4));
++	Tuple inTup = TF.newTuple();
++	inTup.append(t);
++
++	DataBag inBag = BF.newDefaultBag();
++	inBag.add(TF.newTuple(Lists.newArrayList("a", "b", 4)));
++	inBag.add(TF.newTuple(Lists.newArrayList("a", null, 4)));
++	inTup.append(inBag);
++
++	Tuple o = TF.newTuple(Lists.newArrayList("a", "b"));
++	Tuple outTup = TF.newTuple();
++	outTup.append(o);
++
++	DataBag outBag = BF.newDefaultBag();
++	outBag.add(TF.newTuple(Lists.newArrayList("a", "b")));
++	outBag.add(TF.newTuple(Lists.newArrayList("a", null)));
++	outTup.append(outBag);
++
++	PostProcessCube ppc = new PostProcessCube();
++	Tuple result = ppc.exec(inTup);
++
++	assertTrue("Expected: " + outTup + " Got: " + result, outTup.equals(result));
++    }
++}
