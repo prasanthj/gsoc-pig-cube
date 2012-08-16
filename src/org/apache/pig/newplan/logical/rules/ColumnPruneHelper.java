@@ -35,6 +35,7 @@ import org.apache.pig.newplan.logical.expression.LogicalExpressionPlan;
 import org.apache.pig.newplan.logical.expression.ProjectExpression;
 import org.apache.pig.newplan.logical.relational.LOCogroup;
 import org.apache.pig.newplan.logical.relational.LOCross;
+import org.apache.pig.newplan.logical.relational.LOCube;
 import org.apache.pig.newplan.logical.relational.LODistinct;
 import org.apache.pig.newplan.logical.relational.LOFilter;
 import org.apache.pig.newplan.logical.relational.LOForEach;
@@ -342,6 +343,12 @@ public class ColumnPruneHelper {
             }                                                
             distinct.annotate(INPUTUIDS, input);
         }
+        
+	@Override
+	public void visit(LOCube cube) throws FrontendException {
+	    Set<Long> output = setOutputUids(cube);
+	    cube.annotate(INPUTUIDS, output);
+	}
         
         @Override
         public void visit(LOCross cross) throws FrontendException {

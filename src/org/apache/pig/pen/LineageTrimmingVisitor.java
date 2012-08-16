@@ -40,6 +40,7 @@ import org.apache.pig.data.DataBag;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.impl.PigContext;
 import org.apache.pig.newplan.logical.relational.LOCogroup;
+import org.apache.pig.newplan.logical.relational.LOCube;
 import org.apache.pig.newplan.logical.relational.LOJoin;
 import org.apache.pig.newplan.logical.relational.LOCross;
 import org.apache.pig.newplan.logical.relational.LODistinct;
@@ -170,6 +171,12 @@ public class LineageTrimmingVisitor extends LogicalRelationalNodesVisitor {
     public void visit(LOFilter filter) throws FrontendException {
         if (continueTrimming)
             processOperator(filter);
+    }
+    
+    @Override
+    public void visit(LOCube cube) throws FrontendException {
+	if (continueTrimming)
+	    processOperator(cube);
     }
     
     @Override

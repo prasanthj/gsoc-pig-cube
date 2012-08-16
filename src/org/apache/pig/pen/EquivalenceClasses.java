@@ -29,6 +29,7 @@ import java.util.Iterator;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.PhysicalOperator;
 import org.apache.pig.data.DataBag;
 import org.apache.pig.data.Tuple;
+import org.apache.pig.newplan.logical.relational.LOCube;
 import org.apache.pig.newplan.logical.relational.LOForEach;
 import org.apache.pig.newplan.logical.relational.LOCross;
 import org.apache.pig.newplan.logical.relational.LogicalRelationalOperator;
@@ -99,6 +100,8 @@ public class EquivalenceClasses {
                 eqClasses.add(eqClass);
                 result.put((LogicalRelationalOperator)parent, eqClasses);
             }
+        } else if (parent instanceof LOCube) {
+            //do nothing. Just leave the results as such
         } else {
             Collection<IdentityHashSet<Tuple>> eqClasses = poToEqclassesMap.get(logToPhyMap.get(parent));
             if (eqClasses == null) {

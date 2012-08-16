@@ -32,6 +32,7 @@ import org.apache.pig.impl.logicalLayer.FrontendException;
 import org.apache.pig.newplan.logical.relational.LOForEach;
 import org.apache.pig.newplan.logical.relational.LogicalRelationalOperator;
 import org.apache.pig.newplan.logical.relational.LOStore;
+import org.apache.pig.newplan.logical.relational.LOCube;
 import org.apache.pig.newplan.logical.relational.LOLoad;
 import org.apache.pig.newplan.logical.relational.LOLimit;
 import org.apache.pig.newplan.logical.relational.LogicalPlan;
@@ -111,7 +112,11 @@ public class DisplayExamples {
             {
                 op = op.getPlan().getSuccessors(op).get(0);
                 bag = exampleData.get(op);
-            }
+            } else if (op instanceof LOCube) {
+		// LOCube operator doesn't perform any operations by itself. 
+        	// so get the data from its successor and print it
+		bag = exampleData.get(op.getPlan().getPredecessors(op).get(0));
+	    }
             try {
                 DisplayTable(MakeArray(op, bag), op, bag, output);
             } catch (FrontendException e) {

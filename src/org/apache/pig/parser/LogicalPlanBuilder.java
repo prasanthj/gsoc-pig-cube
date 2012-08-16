@@ -386,17 +386,33 @@ public class LogicalPlanBuilder {
 
 	// set the expression plans for cube operator and build cube operator
 	op.setExpressionPlans(expressionPlans);
-	op.setOperations(operations);
 	buildOp(loc, op, alias, inputAlias, null);
 	expandAndResetVisitor(loc, op);
 	try {
+	    setOpsDimensions(op, operations, expressionPlans);
 	    alias = convertCubeToFGPlan(loc, op, inputAlias, operations, expressionPlans);
+	    expandAndResetVisitor(loc, op);
 	} catch (FrontendException e) {
 	    throw new ParserValidationException(intStream, loc, e);
 	}
 	return alias;
     }
 
+    // This method sets the cube operations sequence along with dimensions
+    private void setOpsDimensions(LOCube op, List<String> operations,
+	    MultiMap<Integer, LogicalExpressionPlan> expressionPlans) throws FrontendException {
+
+	MultiMap<Integer, String> dims = new MultiMap<Integer, String>();
+	for (int i = 0; i < operations.size(); i++) {
+	    for (LogicalExpressionPlan lep : expressionPlans.get(i)) {
+		LogicalExpression lex = (LogicalExpression) lep.getSources().get(0);
+		dims.put(i, lex.getFieldSchema().alias);
+	    }
+	}
+	op.setDimensions(dims);
+	op.setOperations(operations);
+    }
+    
     // if multiple CUBE operations occur continuously then it can be combined
     // together CUBE rel BY CUBE(a,b), CUBE(c,d); => CUBE rel BY CUBE(a,b,c,d)
     private void combineCubeOperations(ArrayList<String> operations,
@@ -409,10 +425,10 @@ public class LogicalPlanBuilder {
 
 	// scan and perform merge of column projections
 	for (i = 0; i < operations.size(); i++) {
-	    if ((startIdx == -1) && (operations.get(i).equals("CUBE") == true)) {
+	    if ((startIdx == -1) && (operations.get(i).equals(LOCube.CUBE_OP) == true)) {
 		startIdx = i;
 	    } else {
-		if (operations.get(i).equals("CUBE") == true) {
+		if (operations.get(i).equals(LOCube.CUBE_OP) == true) {
 		    endIdx = i;
 		} else {
 		    if (endIdx > startIdx) {
@@ -573,7 +589,7 @@ public class LogicalPlanBuilder {
 
 	    // Create UDF with user specified dimensions
 	    LogicalExpressionPlan uexpPlan = new LogicalExpressionPlan();
-	    if (operations.get(operIdx).equals("CUBE")) {
+	    if (operations.get(operIdx).equals(LOCube.CUBE_OP)) {
 		new UserFuncExpression(uexpPlan, new FuncSpec(CubeDimensions.class.getName()),
 		        lexpList);
 	    } else {
@@ -633,11 +649,16 @@ public class LogicalPlanBuilder {
 
 	// build group by operator
 	try {
-	    return buildGroupOp(loc, (LOCogroup) groupby, op.getAlias(), inpAliases, exprPlansCopy,
+	    buildGroupOp(loc, (LOCogroup) groupby, op.getAlias(), inpAliases, exprPlansCopy,
 		    GROUPTYPE.REGULAR, innerFlags, null);
 	} catch (ParserValidationException pve) {
 	    throw new FrontendException(pve);
 	}
+	
+	plan.add(op);
+	plan.connect(groupby, op);
+
+	return op.getAlias();
     }
 
     // User defined schema for generate operator. If not specified output schema
