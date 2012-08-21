@@ -87,7 +87,7 @@ public class CubeDimensions extends EvalFunc<DataBag> {
         recursivelyCube(result, tuple, 0, newt);
         return bf.newDefaultBag(result);
     }
-   
+
     private void recursivelyCube(List<Tuple> result, Tuple input, int index, Tuple newt) throws ExecException {
         newt.set(index, input.get(index));
         if (index == input.size() - 1 ) {
@@ -116,11 +116,11 @@ public class CubeDimensions extends EvalFunc<DataBag> {
     }
 
     public List<Tuple> getLattice(List<String> dimensions) throws ExecException {
-	List<Tuple> lattice = Lists.newArrayListWithCapacity((int) Math.pow(2, dimensions.size()));
-	Tuple tuple = tf.newTuple(dimensions);
-	Tuple newt = tf.newTuple(tuple.size());
-	recursivelyCube(lattice, tuple, 0, newt);
-	return lattice;
+        List<Tuple> lattice = Lists.newArrayListWithCapacity((int) Math.pow(2, dimensions.size()));
+        Tuple tuple = tf.newTuple(dimensions);
+        Tuple newt = tf.newTuple(tuple.size());
+        recursivelyCube(lattice, tuple, 0, newt);
+        return lattice;
     }
 
 }

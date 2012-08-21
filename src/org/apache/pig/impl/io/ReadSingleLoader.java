@@ -104,12 +104,12 @@ public class ReadSingleLoader extends LoadFunc implements LoadMetadata {
      * @throws InterruptedException
      */
     public ReadSingleLoader(LoadFunc wrappedLoadFunc, Configuration conf, String inputLocation, int splitIndex)
-	    throws IOException {
-	this.wrappedLoadFunc = wrappedLoadFunc;
-	this.inputLocation = inputLocation;
-	this.conf = conf;
-	this.curSplitIndex = splitIndex;
-	init();
+            throws IOException {
+        this.wrappedLoadFunc = wrappedLoadFunc;
+        this.inputLocation = inputLocation;
+        this.conf = conf;
+        this.curSplitIndex = splitIndex;
+        init();
     }
 
     /**
@@ -123,52 +123,52 @@ public class ReadSingleLoader extends LoadFunc implements LoadMetadata {
      * @throws InterruptedException
      */
     public ReadSingleLoader(LoadFunc wrappedLoadFunc, Configuration conf, String inputLocation, int[] toReadSplitIdxs)
-	    throws IOException {
-	this.wrappedLoadFunc = wrappedLoadFunc;
-	this.inputLocation = inputLocation;
-	this.toReadSplits = toReadSplitIdxs;
-	this.conf = conf;
-	this.curSplitIndex = toReadSplitIdxs.length > 0 ? toReadSplitIdxs[0] : Integer.MAX_VALUE;
-	init();
+            throws IOException {
+        this.wrappedLoadFunc = wrappedLoadFunc;
+        this.inputLocation = inputLocation;
+        this.toReadSplits = toReadSplitIdxs;
+        this.conf = conf;
+        this.curSplitIndex = toReadSplitIdxs.length > 0 ? toReadSplitIdxs[0] : Integer.MAX_VALUE;
+        init();
     }
 
     @SuppressWarnings("unchecked")
     private void init() throws IOException {
-	// make a copy so that if the underlying InputFormat writes to the
-	// conf, we don't affect the caller's copy
-	conf = new Configuration(conf);
-	// let's initialize the wrappedLoadFunc
-	Job job = new Job(conf);
-	wrappedLoadFunc.setLocation(inputLocation, job);
-	// The above setLocation call could write to the conf within
-	// the job - get a hold of the modified conf
-	conf = job.getConfiguration();
-	inputFormat = wrappedLoadFunc.getInputFormat();
-	try {
-	    inpSplits = inputFormat.getSplits(HadoopShims.createJobContext(conf, new JobID()));
-	} catch (InterruptedException e) {
-	    throw new IOException(e);
-	}
+        // make a copy so that if the underlying InputFormat writes to the
+        // conf, we don't affect the caller's copy
+        conf = new Configuration(conf);
+        // let's initialize the wrappedLoadFunc
+        Job job = new Job(conf);
+        wrappedLoadFunc.setLocation(inputLocation, job);
+        // The above setLocation call could write to the conf within
+        // the job - get a hold of the modified conf
+        conf = job.getConfiguration();
+        inputFormat = wrappedLoadFunc.getInputFormat();
+        try {
+            inpSplits = inputFormat.getSplits(HadoopShims.createJobContext(conf, new JobID()));
+        } catch (InterruptedException e) {
+            throw new IOException(e);
+        }
     }
 
     private boolean initializeReader() throws IOException, InterruptedException {
-	if (curSplitIndex > inpSplits.size() - 1) {
-	    // past the last split, we are done
-	    return false;
-	}
-	if (reader != null) {
-	    reader.close();
-	}
-	InputSplit curSplit = inpSplits.get(curSplitIndex);
-	TaskAttemptContext tAContext = HadoopShims.createTaskAttemptContext(conf, new TaskAttemptID());
-	reader = inputFormat.createRecordReader(curSplit, tAContext);
-	reader.initialize(curSplit, tAContext);
-	// create a dummy pigsplit - other than the actual split, the other
-	// params are really not needed here where we are just reading the
-	// input completely
-	PigSplit pigSplit = new PigSplit(new InputSplit[] { curSplit }, -1, new ArrayList<OperatorKey>(), -1);
-	wrappedLoadFunc.prepareToRead(reader, pigSplit);
-	return true;
+        if (curSplitIndex > inpSplits.size() - 1) {
+            // past the last split, we are done
+            return false;
+        }
+        if (reader != null) {
+            reader.close();
+        }
+        InputSplit curSplit = inpSplits.get(curSplitIndex);
+        TaskAttemptContext tAContext = HadoopShims.createTaskAttemptContext(conf, new TaskAttemptID());
+        reader = inputFormat.createRecordReader(curSplit, tAContext);
+        reader.initialize(curSplit, tAContext);
+        // create a dummy pigsplit - other than the actual split, the other
+        // params are really not needed here where we are just reading the
+        // input completely
+        PigSplit pigSplit = new PigSplit(new InputSplit[] { curSplit }, -1, new ArrayList<OperatorKey>(), -1);
+        wrappedLoadFunc.prepareToRead(reader, pigSplit);
+        return true;
     }
 
     // Reads a tuple and returns the raw bytes read
@@ -176,113 +176,113 @@ public class ReadSingleLoader extends LoadFunc implements LoadMetadata {
     // Provide support for n random samples and returning
     // the average bytes read.
     public long getRawTupleSize() throws IOException {
-	long size = -1;
-	try {
-	    Tuple t = null;
-	    if (reader == null) {
-		// first call will initailize reader
-		getNextHelper();
-		size = ((PigStorage) wrappedLoadFunc).getRawTupleSize();
-		return size;
-	    } else {
-		// we already have a reader initialized
-		t = wrappedLoadFunc.getNext();
-		if (t != null) {
-		    size = ((PigStorage) wrappedLoadFunc).getRawTupleSize();
-		    return size;
-		}
-		// if loadfunc returned null, we need to read next split
-		// if there is one
-		updateCurSplitIndex();
-		getNextHelper();
-		size = ((PigStorage) wrappedLoadFunc).getRawTupleSize();
-		return size;
-	    }
-	} catch (InterruptedException e) {
-	    throw new IOException(e);
-	} catch (ClassCastException e) {
-	    // FIXME: what to do if PigStorage type casting fails?
-	    throw new IOException("Failed casting to PigStorage. Raw tuple size is supported only in PigStorage.", e);
-	}
+        long size = -1;
+        try {
+            Tuple t = null;
+            if (reader == null) {
+                // first call will initailize reader
+                getNextHelper();
+                size = ((PigStorage) wrappedLoadFunc).getRawTupleSize();
+                return size;
+            } else {
+                // we already have a reader initialized
+                t = wrappedLoadFunc.getNext();
+                if (t != null) {
+                    size = ((PigStorage) wrappedLoadFunc).getRawTupleSize();
+                    return size;
+                }
+                // if loadfunc returned null, we need to read next split
+                // if there is one
+                updateCurSplitIndex();
+                getNextHelper();
+                size = ((PigStorage) wrappedLoadFunc).getRawTupleSize();
+                return size;
+            }
+        } catch (InterruptedException e) {
+            throw new IOException(e);
+        } catch (ClassCastException e) {
+            // FIXME: what to do if PigStorage type casting fails?
+            throw new IOException("Failed casting to PigStorage. Raw tuple size is supported only in PigStorage.", e);
+        }
 
     }
 
     private Tuple getNextHelper() throws IOException, InterruptedException {
-	Tuple t = null;
-	while (initializeReader()) {
-	    t = wrappedLoadFunc.getNext();
-	    if (t == null) {
-		// try next split
-		updateCurSplitIndex();
-	    } else {
-		return t;
-	    }
-	}
-	return null;
+        Tuple t = null;
+        while (initializeReader()) {
+            t = wrappedLoadFunc.getNext();
+            if (t == null) {
+                // try next split
+                updateCurSplitIndex();
+            } else {
+                return t;
+            }
+        }
+        return null;
     }
 
     /**
      * Updates curSplitIndex , just increment if splitIndexes is null, else get next split in splitIndexes
      */
     private void updateCurSplitIndex() {
-	if (toReadSplits == null) {
-	    ++curSplitIndex;
-	} else {
-	    ++toReadSplitsIdx;
-	    if (toReadSplitsIdx >= toReadSplits.length) {
-		// finished all the splits in splitIndexes array
-		curSplitIndex = Integer.MAX_VALUE;
-	    } else {
-		curSplitIndex = toReadSplits[toReadSplitsIdx];
-	    }
-	}
+        if (toReadSplits == null) {
+            ++curSplitIndex;
+        } else {
+            ++toReadSplitsIdx;
+            if (toReadSplitsIdx >= toReadSplits.length) {
+                // finished all the splits in splitIndexes array
+                curSplitIndex = Integer.MAX_VALUE;
+            } else {
+                curSplitIndex = toReadSplits[toReadSplitsIdx];
+            }
+        }
     }
 
     @Override
     public ResourceSchema getSchema(String location, Job job) throws IOException {
-	// TODO Auto-generated method stub
-	return null;
+        // TODO Auto-generated method stub
+        return null;
     }
 
     @Override
     public ResourceStatistics getStatistics(String location, Job job) throws IOException {
-	// TODO Auto-generated method stub
-	return null;
+        // TODO Auto-generated method stub
+        return null;
     }
 
     @Override
     public String[] getPartitionKeys(String location, Job job) throws IOException {
-	// TODO Auto-generated method stub
-	return null;
+        // TODO Auto-generated method stub
+        return null;
     }
 
     @Override
     public void setPartitionFilter(Expression partitionFilter) throws IOException {
-	// TODO Auto-generated method stub
+        // TODO Auto-generated method stub
 
     }
 
     @Override
     public void setLocation(String location, Job job) throws IOException {
-	// TODO Auto-generated method stub
+        // TODO Auto-generated method stub
 
     }
 
     @Override
     public InputFormat getInputFormat() throws IOException {
-	// TODO Auto-generated method stub
-	return null;
+        // TODO Auto-generated method stub
+        return null;
     }
 
     @Override
     public void prepareToRead(RecordReader reader, PigSplit split) throws IOException {
-	// TODO Auto-generated method stub
+        // TODO Auto-generated method stub
 
     }
 
     @Override
     public Tuple getNext() throws IOException {
-	// TODO Auto-generated method stub
-	return null;
+        // TODO Auto-generated method stub
+        return null;
     }
 }

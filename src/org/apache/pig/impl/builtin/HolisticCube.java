@@ -61,42 +61,37 @@ public class HolisticCube extends EvalFunc<DataBag> {
     private String annotatedLatticeLocation;
     private HashMap<Tuple, Integer> aLattice;
 
-    // for debugging
-    boolean printOutputOnce = false;
-    boolean printInputOnce = false;
-
     public HolisticCube(String[] args) {
-	this.tf = TupleFactory.getInstance();
-	this.bf = BagFactory.getInstance();
-	this.cl = new ArrayList<Tuple>();
-	stringArrToTupleList(this.cl, args);
-	this.isLatticeRead = false;
-	this.aLattice = new HashMap<Tuple, Integer>();
-	log.info("[CUBE] lattice - " + cl);
+        this.tf = TupleFactory.getInstance();
+        this.bf = BagFactory.getInstance();
+        this.cl = new ArrayList<Tuple>();
+        stringArrToTupleList(this.cl, args);
+        this.isLatticeRead = false;
+        this.aLattice = new HashMap<Tuple, Integer>();
     }
 
     private void stringArrToTupleList(List<Tuple> cl, String[] args) {
 
-	// region labels are csv strings. if trailing values of region label
-	// are null/empty then split function ignores those values. specify some
-	// integer value greater than the number of output tokens makes sure that
-	// all null values in region label are assigned an empty string. first
-	// value which is the most detailed level in the lattice doesn't have null values
-	// so assigning the length of first value as max index
-	int maxIdx = args[0].length();
+        // region labels are csv strings. if trailing values of region label
+        // are null/empty then split function ignores those values. specify some
+        // integer value greater than the number of output tokens makes sure that
+        // all null values in region label are assigned an empty string. first
+        // value which is the most detailed level in the lattice doesn't have null values
+        // so assigning the length of first value as max index
+        int maxIdx = args[0].length();
 
-	for (String arg : args) {
-	    Tuple newt = tf.newTuple();
-	    String[] tokens = arg.split(",", maxIdx);
-	    for (String token : tokens) {
-		if (token.equals("") == true) {
-		    newt.append(null);
-		} else {
-		    newt.append(token);
-		}
-	    }
-	    cl.add(newt);
-	}
+        for (String arg : args) {
+            Tuple newt = tf.newTuple();
+            String[] tokens = arg.split(",", maxIdx);
+            for (String token : tokens) {
+                if (token.equals("") == true) {
+                    newt.append(null);
+                } else {
+                    newt.append(token);
+                }
+            }
+            cl.add(newt);
+        }
     }
 
     /**
@@ -106,113 +101,111 @@ public class HolisticCube extends EvalFunc<DataBag> {
      * attribute with same value does NOT go to different reducers
      */
     public DataBag exec(Tuple in) throws IOException {
-	if (printInputOnce == false) {
-	    log.info("[CUBE] Input - " + in);
-	    printInputOnce = true;
-	}
+        if (log.isDebugEnabled()) {
+            log.debug("[CUBE] Input - " + in);
+        }
 
-	if (in == null || in.size() == 0) {
-	    return null;
-	}
+        if (in == null || in.size() == 0) {
+            return null;
+        }
 
-	if (isLatticeRead == false) {
-	    readAnnotatedLattice();
-	}
-	Utils.convertNullToUnknown(in);
-	List<Tuple> groups = getAllCubeCombinations(in);
+        if (isLatticeRead == false) {
+            readAnnotatedLattice();
+        }
+        Utils.convertNullToUnknown(in);
+        List<Tuple> groups = getAllCubeCombinations(in);
 
-	if (printOutputOnce == false) {
-	    log.info("[CUBE] Output - " + bf.newDefaultBag(groups));
-	    printOutputOnce = true;
-	}
+        if (log.isDebugEnabled()) {
+            log.debug("[CUBE] Output - " + bf.newDefaultBag(groups));
+        }
 
-	return bf.newDefaultBag(groups);
+        return bf.newDefaultBag(groups);
     }
 
     private void readAnnotatedLattice() throws IOException {
-	ReadToEndLoader loader;
-	try {
-	    Configuration udfconf = UDFContext.getUDFContext().getJobConf();
-	    annotatedLatticeLocation = udfconf.get("pig.annotatedLatticeFile", "");
+        ReadToEndLoader loader;
+        try {
+            Configuration udfconf = UDFContext.getUDFContext().getJobConf();
+            annotatedLatticeLocation = udfconf.get("pig.annotatedLatticeFile", "");
 
-	    if (annotatedLatticeLocation.length() == 0) {
-		throw new RuntimeException(this.getClass().getSimpleName()
-		        + " used but no annotated lattice file found");
-	    }
+            if (annotatedLatticeLocation.length() == 0) {
+                throw new RuntimeException(this.getClass().getSimpleName()
+                        + " used but no annotated lattice file found");
+            }
 
-	    Configuration conf = new Configuration();
+            Configuration conf = new Configuration();
 
-	    // Hadoop security need this property to be set
-	    if (System.getenv("HADOOP_TOKEN_FILE_LOCATION") != null) {
-		conf.set("mapreduce.job.credentials.binary", System.getenv("HADOOP_TOKEN_FILE_LOCATION"));
-	    }
-	    if (udfconf.get("fs.file.impl") != null)
-		conf.set("fs.file.impl", udfconf.get("fs.file.impl"));
-	    if (udfconf.get("fs.hdfs.impl") != null)
-		conf.set("fs.hdfs.impl", udfconf.get("fs.hdfs.impl"));
-	    if (udfconf.getBoolean("pig.tmpfilecompression", false)) {
-		conf.setBoolean("pig.tmpfilecompression", true);
-		if (udfconf.get("pig.tmpfilecompression.codec") != null)
-		    conf.set("pig.tmpfilecompression.codec", udfconf.get("pig.tmpfilecompression.codec"));
-	    }
-	    conf.set(MapRedUtil.FILE_SYSTEM_NAME, "file:///");
+            // Hadoop security need this property to be set
+            if (System.getenv("HADOOP_TOKEN_FILE_LOCATION") != null) {
+                conf.set("mapreduce.job.credentials.binary", System.getenv("HADOOP_TOKEN_FILE_LOCATION"));
+            }
+            if (udfconf.get("fs.file.impl") != null)
+                conf.set("fs.file.impl", udfconf.get("fs.file.impl"));
+            if (udfconf.get("fs.hdfs.impl") != null)
+                conf.set("fs.hdfs.impl", udfconf.get("fs.hdfs.impl"));
+            if (udfconf.getBoolean("pig.tmpfilecompression", false)) {
+                conf.setBoolean("pig.tmpfilecompression", true);
+                if (udfconf.get("pig.tmpfilecompression.codec") != null)
+                    conf.set("pig.tmpfilecompression.codec", udfconf.get("pig.tmpfilecompression.codec"));
+            }
+            conf.set(MapRedUtil.FILE_SYSTEM_NAME, "file:///");
 
-	    loader = new ReadToEndLoader(Utils.getTmpFileStorageObject(conf), conf, annotatedLatticeLocation, 0);
+            loader = new ReadToEndLoader(Utils.getTmpFileStorageObject(conf), conf, annotatedLatticeLocation, 0);
 
-	    Tuple t;
-	    while ((t = loader.getNext()) != null) {
-		log.info("[CUBE] Annotated Region: " + t.toString());
-		int paritionFactor = Integer.valueOf(t.get(1).toString());
-		aLattice.put((Tuple) t.get(0), paritionFactor);
-	    }
+            Tuple t;
+            while ((t = loader.getNext()) != null) {
+                log.info("[CUBE] Annotated Region: " + t.toString());
+                int paritionFactor = Integer.valueOf(t.get(1).toString());
+                aLattice.put((Tuple) t.get(0), paritionFactor);
+            }
 
-	    // after reading annotated lattice we do not need the normal
-	    // lattice anymore
-	    isLatticeRead = true;
-	    cl = null;
-	} catch (IOException e) {
-	    throw new IOException("Error while processing annotated lattice " + annotatedLatticeLocation, e);
-	}
+            // after reading annotated lattice we do not need the normal
+            // lattice anymore
+            isLatticeRead = true;
+            cl = null;
+        } catch (IOException e) {
+            throw new IOException("Error while processing annotated lattice " + annotatedLatticeLocation, e);
+        }
     }
 
     private List<Tuple> getAllCubeCombinations(Tuple in) throws IOException {
-	List<Tuple> result = null;
-	if (isLatticeRead == true) {
-	    result = new ArrayList<Tuple>(in.size());
+        List<Tuple> result = null;
+        if (isLatticeRead == true) {
+            result = new ArrayList<Tuple>(in.size());
 
-	    // This means the lattice has been read and annotated
-	    for (Map.Entry<Tuple, Integer> entry : aLattice.entrySet()) {
-		Tuple region = entry.getKey();
-		int pf = entry.getValue();
+            // This means the lattice has been read and annotated
+            for (Map.Entry<Tuple, Integer> entry : aLattice.entrySet()) {
+                Tuple region = entry.getKey();
+                int pf = entry.getValue();
 
-		Tuple newt = tf.newTuple(in.getAll());
-		// input tuple will have one additional field because
-		// the algebraic attribute will also be projected (last field)
-		if (region.size() + 1 != in.size()) {
-		    throw new RuntimeException(
-			    "Number of fields in tuple should be equal to the number of fields in region tuple.");
-		}
-		for (int i = 0; i < region.size(); i++) {
-		    if (region.get(i) == null) {
-			newt.set(i, null);
-		    }
-		}
+                Tuple newt = tf.newTuple(in.getAll());
+                // input tuple will have one additional field because
+                // the algebraic attribute will also be projected (last field)
+                if (region.size() + 1 != in.size()) {
+                    throw new RuntimeException(
+                            "Number of fields in tuple should be equal to the number of fields in region tuple.");
+                }
+                for (int i = 0; i < region.size(); i++) {
+                    if (region.get(i) == null) {
+                        newt.set(i, null);
+                    }
+                }
 
-		// last tuple is the algebraic attribute
-		// TODO check if it works correctly for all data types
-		// alg attr with same values should NOT go to different reducers
-		Object algAttr = newt.get(newt.size() - 1);
-		if (pf > 1) {
-		    newt.set(newt.size() - 1, algAttr.hashCode() % pf);
-		}
+                // last tuple is the algebraic attribute
+                // TODO check if it works correctly for all data types
+                // alg attr with same values should NOT go to different reducers
+                Object algAttr = newt.get(newt.size() - 1);
+                if (pf > 1) {
+                    newt.set(newt.size() - 1, algAttr.hashCode() % pf);
+                }
 
-		result.add(newt);
-	    }
-	}
-	return result;
+                result.add(newt);
+            }
+        }
+        return result;
     }
 
     public Type getReturnType() {
-	return DataBag.class;
+        return DataBag.class;
     }
 }

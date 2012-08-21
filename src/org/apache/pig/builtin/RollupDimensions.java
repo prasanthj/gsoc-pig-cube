@@ -50,51 +50,51 @@ public class RollupDimensions extends EvalFunc<DataBag> {
     private final String allMarker;
 
     public RollupDimensions() {
-	this(null);
+        this(null);
     }
 
     public RollupDimensions(String allMarker) {
-	super();
-	this.allMarker = allMarker;
+        super();
+        this.allMarker = allMarker;
     }
 
     @Override
     public DataBag exec(Tuple tuple) throws IOException {
-	List<Tuple> result = Lists.newArrayListWithCapacity(tuple.size() + 1);
-	Utils.convertNullToUnknown(tuple);
-	result.add(tuple);
-	iterativelyRollup(result, tuple);
-	return bf.newDefaultBag(result);
+        List<Tuple> result = Lists.newArrayListWithCapacity(tuple.size() + 1);
+        Utils.convertNullToUnknown(tuple);
+        result.add(tuple);
+        iterativelyRollup(result, tuple);
+        return bf.newDefaultBag(result);
     }
 
     private void iterativelyRollup(List<Tuple> result, Tuple input) throws ExecException {
-	Tuple tempTup = tf.newTuple(input.getAll());
-	for (int i = input.size() - 1; i >= 0; i--) {
-	    tempTup.set(i, allMarker);
-	    result.add(tf.newTuple(tempTup.getAll()));
-	}
+        Tuple tempTup = tf.newTuple(input.getAll());
+        for (int i = input.size() - 1; i >= 0; i--) {
+            tempTup.set(i, allMarker);
+            result.add(tf.newTuple(tempTup.getAll()));
+        }
     }
 
     public List<Tuple> getLattice(List<String> dimensions) throws ExecException {
-	List<Tuple> lattice = Lists.newArrayListWithCapacity(dimensions.size() + 1);
-	Tuple tuple = tf.newTuple(dimensions);
-	lattice.add(tuple);
-	iterativelyRollup(lattice, tuple);
-	return lattice;
+        List<Tuple> lattice = Lists.newArrayListWithCapacity(dimensions.size() + 1);
+        Tuple tuple = tf.newTuple(dimensions);
+        lattice.add(tuple);
+        iterativelyRollup(lattice, tuple);
+        return lattice;
     }
-    
+
     @Override
     public Schema outputSchema(Schema input) {
-	// "dimensions" string is the default namespace assigned to the output
-	// schema. this can be overridden by specifying user defined schema
-	// names in foreach operator. if user defined schema names are not
-	// specified then the output schema of foreach operator using this UDF
-	// will have "dimensions::" namespace for all fields in the tuple
-	try {
-	    return new Schema(new FieldSchema("dimensions", input, DataType.BAG));
-	} catch (FrontendException e) {
-	    // we are specifying BAG explicitly, so this should not happen.
-	    throw new RuntimeException(e);
-	}
+        // "dimensions" string is the default namespace assigned to the output
+        // schema. this can be overridden by specifying user defined schema
+        // names in foreach operator. if user defined schema names are not
+        // specified then the output schema of foreach operator using this UDF
+        // will have "dimensions::" namespace for all fields in the tuple
+        try {
+            return new Schema(new FieldSchema("dimensions", input, DataType.BAG));
+        } catch (FrontendException e) {
+            // we are specifying BAG explicitly, so this should not happen.
+            throw new RuntimeException(e);
+        }
     }
 }

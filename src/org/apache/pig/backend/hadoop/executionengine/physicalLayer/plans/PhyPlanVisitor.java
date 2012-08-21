@@ -253,7 +253,7 @@ public class PhyPlanVisitor extends PlanVisitor<PhysicalOperator,PhysicalPlan> {
     }
     
     public void visitCube(POCube cube) throws VisitorException {
-	// do nothing
+        // do nothing
     }
 
     public void visitFRJoin(POFRJoin join) throws VisitorException {

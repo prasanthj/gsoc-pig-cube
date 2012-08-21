@@ -43,110 +43,107 @@ public class POCube extends PhysicalOperator {
     public static final String HOLISTIC_TOPK = "topk";
 
     public POCube(OperatorKey k, int rp) {
-	this(k, rp, null, false, null);
+        this(k, rp, null, false, null);
     }
 
     public POCube(OperatorKey k, int rp, List<PhysicalOperator> inp, boolean isHolistic, String algebraicAttr) {
-	super(k, rp, inp);
-	this.isHolistic = isHolistic;
-	this.algebraicAttr = algebraicAttr;
-	this.cubeLattice = null;
-	this.holisticMeasure = null;
-	this.isPostAggRequired = false;
-	this.postAggLR = null;
-	this.numDimensions = 0;
+        super(k, rp, inp);
+        this.isHolistic = isHolistic;
+        this.algebraicAttr = algebraicAttr;
+        this.cubeLattice = null;
+        this.holisticMeasure = null;
+        this.isPostAggRequired = false;
+        this.postAggLR = null;
+        this.numDimensions = 0;
     }
 
-    /**
-     * 
-     */
     private static final long serialVersionUID = 1L;
 
     @Override
     public Tuple illustratorMarkup(Object in, Object out, int eqClassIndex) {
-	return null;
+        return null;
     }
 
     @Override
     public void visit(PhyPlanVisitor v) throws VisitorException {
-	v.visitCube(this);
+        v.visitCube(this);
     }
 
     @Override
     public boolean supportsMultipleInputs() {
-	return false;
+        return false;
     }
 
     @Override
     public boolean supportsMultipleOutputs() {
-	return false;
+        return false;
     }
 
     @Override
     public String name() {
-	String measure;
-	if (isHolistic) {
-	    measure = "holistic[" + this.getHolisticMeasure() + "]";
-	} else {
-	    measure = "algebraic";
-	}
-	return getAliasString() + "POCube[" + DataType.findTypeName(resultType) + "]" + " Measure - " + measure + " - "
-	        + mKey.toString();
+        String measure;
+        if (isHolistic) {
+            measure = "holistic[" + this.getHolisticMeasure() + "]";
+        } else {
+            measure = "algebraic";
+        }
+        return getAliasString() + "POCube[" + DataType.findTypeName(resultType) + "]" + " Measure - " + measure + " - "
+        + mKey.toString();
     }
 
     public boolean isHolistic() {
-	return isHolistic;
+        return isHolistic;
     }
 
     public void setHolistic(boolean isHolistic) {
-	this.isHolistic = isHolistic;
+        this.isHolistic = isHolistic;
     }
 
     public String getAlgebraicAttr() {
-	return algebraicAttr;
+        return algebraicAttr;
     }
 
     public void setAlgebraicAttr(String algebraicAttr) {
-	this.algebraicAttr = algebraicAttr;
+        this.algebraicAttr = algebraicAttr;
     }
 
     public List<Tuple> getCubeLattice() {
-	return cubeLattice;
+        return cubeLattice;
     }
 
     public void setCubeLattice(List<Tuple> cubeLattice) {
-	this.cubeLattice = cubeLattice;
+        this.cubeLattice = cubeLattice;
     }
 
     public String getHolisticMeasure() {
-	return holisticMeasure;
+        return holisticMeasure;
     }
 
     public void setHolisticMeasure(String holisticMeasure) {
-	this.holisticMeasure = holisticMeasure;
+        this.holisticMeasure = holisticMeasure;
     }
 
     public boolean isPostAggRequired() {
-	return isPostAggRequired;
+        return isPostAggRequired;
     }
 
     public void setPostAggRequired(boolean isPostAggRequired) {
-	this.isPostAggRequired = isPostAggRequired;
+        this.isPostAggRequired = isPostAggRequired;
     }
 
     public PhysicalOperator getPostAggLR() {
-	return postAggLR;
+        return postAggLR;
     }
 
     public void setPostAggLR(PhysicalOperator postAggLR) {
-	this.postAggLR = postAggLR;
+        this.postAggLR = postAggLR;
     }
 
     public int getNumDimensions() {
-	return numDimensions;
+        return numDimensions;
     }
 
     public void setNumDimensions(int numDimensions) {
-	this.numDimensions = numDimensions;
+        this.numDimensions = numDimensions;
     }
 }

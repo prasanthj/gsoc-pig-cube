@@ -343,13 +343,13 @@ public class ColumnPruneHelper {
             }                                                
             distinct.annotate(INPUTUIDS, input);
         }
-        
-	@Override
-	public void visit(LOCube cube) throws FrontendException {
-	    Set<Long> output = setOutputUids(cube);
-	    cube.annotate(INPUTUIDS, output);
-	}
-        
+
+        @Override
+        public void visit(LOCube cube) throws FrontendException {
+            Set<Long> output = setOutputUids(cube);
+            cube.annotate(INPUTUIDS, output);
+        }
+
         @Override
         public void visit(LOCross cross) throws FrontendException {
             Set<Long> output = setOutputUids(cross);

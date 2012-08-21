@@ -153,66 +153,66 @@ public class MapRedUtil {
     }
 
     public static List<String> loadAnnotatedLatticeFromHDFS(String latticeFile, Configuration conf) throws IOException {
-	List<String> result = new ArrayList<String>();
+        List<String> result = new ArrayList<String>();
 
-	ReadToEndLoader loader = new ReadToEndLoader(Utils.getTmpFileStorageObject(conf), conf, latticeFile, 0);
-	Tuple t;
-	while ((t = loader.getNext()) != null) {
-	    String finTup = "%s,%s";
-	    String region = t.get(0).toString();
-	    String partition = t.get(1).toString();
-	    result.add(String.format(finTup, region.substring(1, region.length() - 1), partition));
-	}
+        ReadToEndLoader loader = new ReadToEndLoader(Utils.getTmpFileStorageObject(conf), conf, latticeFile, 0);
+        Tuple t;
+        while ((t = loader.getNext()) != null) {
+            String finTup = "%s,%s";
+            String region = t.get(0).toString();
+            String partition = t.get(1).toString();
+            result.add(String.format(finTup, region.substring(1, region.length() - 1), partition));
+        }
 
-	if (result.size() == 0) {
-	    // this means that the lattice file is empty
-	    log.warn("Empty lattice file: " + latticeFile);
-	    return null;
-	}
-	return result;
+        if (result.size() == 0) {
+            // this means that the lattice file is empty
+            log.warn("Empty lattice file: " + latticeFile);
+            return null;
+        }
+        return result;
     }
-    
+
     public static HashMap<Tuple, Integer> loadAnnotatedLatticeFromLocalCache(String latticeFile, Configuration conf,
-	    Integer[] maxReducerCnt) throws IOException {
-	HashMap<Tuple, Integer> result = new HashMap<Tuple, Integer>();
-	boolean firstTuple = true;
+            Integer[] maxReducerCnt) throws IOException {
+        HashMap<Tuple, Integer> result = new HashMap<Tuple, Integer>();
+        boolean firstTuple = true;
 
-	// use local file system to get the keyDistFile
-	Configuration newconf = new Configuration(false);
+        // use local file system to get the keyDistFile
+        Configuration newconf = new Configuration(false);
 
-	if (conf.get("yarn.resourcemanager.principal") != null) {
-	    newconf.set("yarn.resourcemanager.principal", conf.get("yarn.resourcemanager.principal"));
-	}
+        if (conf.get("yarn.resourcemanager.principal") != null) {
+            newconf.set("yarn.resourcemanager.principal", conf.get("yarn.resourcemanager.principal"));
+        }
 
-	if (conf.get("fs.file.impl") != null)
-	    newconf.set("fs.file.impl", conf.get("fs.file.impl"));
-	if (conf.get("fs.hdfs.impl") != null)
-	    newconf.set("fs.hdfs.impl", conf.get("fs.hdfs.impl"));
-	if (conf.getBoolean("pig.tmpfilecompression", false)) {
-	    newconf.setBoolean("pig.tmpfilecompression", true);
-	    if (conf.get("pig.tmpfilecompression.codec") != null)
-		newconf.set("pig.tmpfilecompression.codec", conf.get("pig.tmpfilecompression.codec"));
-	}
-	newconf.set(MapRedUtil.FILE_SYSTEM_NAME, "file:///");
+        if (conf.get("fs.file.impl") != null)
+            newconf.set("fs.file.impl", conf.get("fs.file.impl"));
+        if (conf.get("fs.hdfs.impl") != null)
+            newconf.set("fs.hdfs.impl", conf.get("fs.hdfs.impl"));
+        if (conf.getBoolean("pig.tmpfilecompression", false)) {
+            newconf.setBoolean("pig.tmpfilecompression", true);
+            if (conf.get("pig.tmpfilecompression.codec") != null)
+                newconf.set("pig.tmpfilecompression.codec", conf.get("pig.tmpfilecompression.codec"));
+        }
+        newconf.set(MapRedUtil.FILE_SYSTEM_NAME, "file:///");
 
-	ReadToEndLoader loader = new ReadToEndLoader(Utils.getTmpFileStorageObject(newconf), newconf, latticeFile, 0);
-	Tuple t;
-	while ((t = loader.getNext()) != null) {
-	    if (firstTuple == true) {
-		maxReducerCnt[0] = (Integer) t.get(1);
-		firstTuple = false;
-	    }
-	    result.put((Tuple) t.get(0), (Integer) t.get(1));
-	}
+        ReadToEndLoader loader = new ReadToEndLoader(Utils.getTmpFileStorageObject(newconf), newconf, latticeFile, 0);
+        Tuple t;
+        while ((t = loader.getNext()) != null) {
+            if (firstTuple == true) {
+                maxReducerCnt[0] = (Integer) t.get(1);
+                firstTuple = false;
+            }
+            result.put((Tuple) t.get(0), (Integer) t.get(1));
+        }
 
-	if (result.size() == 0) {
-	    // this means that the lattice file is empty
-	    log.warn("Empty lattice file: " + latticeFile);
-	    return null;
-	}
-	return result;
+        if (result.size() == 0) {
+            // this means that the lattice file is empty
+            log.warn("Empty lattice file: " + latticeFile);
+            return null;
+        }
+        return result;
     }
-    
+
     public static void setupUDFContext(Configuration job) throws IOException {
         UDFContext udfc = UDFContext.getUDFContext();
         udfc.addJobConf(job);

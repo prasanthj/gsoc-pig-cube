@@ -49,63 +49,57 @@ public class PostProcessCube extends EvalFunc<Tuple> {
     private TupleFactory tf;
     private BagFactory bf;
 
-    // for debugging
-    boolean printOutputOnce = false;
-    boolean printInputOnce = false;
-
     public PostProcessCube() {
-	this.tf = TupleFactory.getInstance();
-	this.bf = BagFactory.getInstance();
+        this.tf = TupleFactory.getInstance();
+        this.bf = BagFactory.getInstance();
     }
-    
+
     /**
      * @param in - input tuple with first field as tuple and second field as bag
      * The input tuple is from POPackage operator.
      * @return tuple with algebraicAttribute%patitionFactor value stripped off
      */
     public Tuple exec(Tuple in) throws IOException {
-	if (printInputOnce == false) {
-	    log.info("[CUBE] Input group: " + in.get(0) + " Bag size: " + ((DataBag)in.get(1)).size());
-	    printInputOnce = true;
-	}
+        if (log.isDebugEnabled()) {
+            log.debug("[CUBE] Input group: " + in.get(0) + " Bag size: " + ((DataBag)in.get(1)).size());
+        }
 
-	Tuple keyTuple = (Tuple) in.get(0);
+        Tuple keyTuple = (Tuple) in.get(0);
 
-	Tuple key = tf.newTuple(keyTuple.size() - 1);
-	for (int i = 0; i < keyTuple.size() - 1; i++) {
-	    key.set(i, keyTuple.get(i));
-	}
-	in.set(0, key);
+        Tuple key = tf.newTuple(keyTuple.size() - 1);
+        for (int i = 0; i < keyTuple.size() - 1; i++) {
+            key.set(i, keyTuple.get(i));
+        }
+        in.set(0, key);
 
-	DataBag valueBag = (DataBag) in.get(1);
-	int vpField = keyTuple.size() - 1;
+        DataBag valueBag = (DataBag) in.get(1);
+        int vpField = keyTuple.size() - 1;
 
-	Iterator<Tuple> iter = valueBag.iterator();
-	List<Tuple> resultBag = new ArrayList<Tuple>();
-	while (iter.hasNext()) {
-	    Tuple tup = iter.next();
-	    Tuple newt = tf.newTuple(tup.size() - 1);
-	    int idx = 0;
-	    // We copy all the fields except the field
-	    // with value partition
-	    for (int i = 0; i < tup.size(); i++) {
-		if (i != vpField) {
-		    newt.set(idx, tup.get(i));
-		    idx++;
-		}
-	    }
-	    resultBag.add(newt);
-	}
-	in.set(1, bf.newDefaultBag(resultBag));
+        Iterator<Tuple> iter = valueBag.iterator();
+        List<Tuple> resultBag = new ArrayList<Tuple>();
+        while (iter.hasNext()) {
+            Tuple tup = iter.next();
+            Tuple newt = tf.newTuple(tup.size() - 1);
+            int idx = 0;
+            // We copy all the fields except the field
+            // with value partition
+            for (int i = 0; i < tup.size(); i++) {
+                if (i != vpField) {
+                    newt.set(idx, tup.get(i));
+                    idx++;
+                }
+            }
+            resultBag.add(newt);
+        }
+        in.set(1, bf.newDefaultBag(resultBag));
 
-	if (printOutputOnce == false) {
-	    log.info("[CUBE] Output group: " + in.get(0));
-	    printOutputOnce = true;
-	}
-	return in;
+        if (log.isDebugEnabled()) {
+            log.debug("[CUBE] Output group: " + in.get(0));
+        }
+        return in;
     }
 
     public Type getReturnType() {
-	return Tuple.class;
+        return Tuple.class;
     }
 }

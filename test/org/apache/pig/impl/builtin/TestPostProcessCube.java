@@ -37,27 +37,27 @@ public class TestPostProcessCube {
 
     @Test
     public void testHolisticCubeUDF() throws IOException {
-	Tuple t = TF.newTuple(Lists.newArrayList("a", "b", 4));
-	Tuple inTup = TF.newTuple();
-	inTup.append(t);
+        Tuple t = TF.newTuple(Lists.newArrayList("a", "b", 4));
+        Tuple inTup = TF.newTuple();
+        inTup.append(t);
 
-	DataBag inBag = BF.newDefaultBag();
-	inBag.add(TF.newTuple(Lists.newArrayList("a", "b", 4)));
-	inBag.add(TF.newTuple(Lists.newArrayList("a", null, 4)));
-	inTup.append(inBag);
+        DataBag inBag = BF.newDefaultBag();
+        inBag.add(TF.newTuple(Lists.newArrayList("a", "b", 4)));
+        inBag.add(TF.newTuple(Lists.newArrayList("a", null, 4)));
+        inTup.append(inBag);
 
-	Tuple o = TF.newTuple(Lists.newArrayList("a", "b"));
-	Tuple outTup = TF.newTuple();
-	outTup.append(o);
+        Tuple o = TF.newTuple(Lists.newArrayList("a", "b"));
+        Tuple outTup = TF.newTuple();
+        outTup.append(o);
 
-	DataBag outBag = BF.newDefaultBag();
-	outBag.add(TF.newTuple(Lists.newArrayList("a", "b")));
-	outBag.add(TF.newTuple(Lists.newArrayList("a", null)));
-	outTup.append(outBag);
+        DataBag outBag = BF.newDefaultBag();
+        outBag.add(TF.newTuple(Lists.newArrayList("a", "b")));
+        outBag.add(TF.newTuple(Lists.newArrayList("a", null)));
+        outTup.append(outBag);
 
-	PostProcessCube ppc = new PostProcessCube();
-	Tuple result = ppc.exec(inTup);
+        PostProcessCube ppc = new PostProcessCube();
+        Tuple result = ppc.exec(inTup);
 
-	assertTrue("Expected: " + outTup + " Got: " + result, outTup.equals(result));
+        assertTrue("Expected: " + outTup + " Got: " + result, outTup.equals(result));
     }
 }

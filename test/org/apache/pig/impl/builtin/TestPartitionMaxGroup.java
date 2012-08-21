@@ -41,52 +41,52 @@ public class TestPartitionMaxGroup {
 
     @Test
     public void testHolisticCubeUDF() throws IOException {
-	List<Tuple> tupList = new ArrayList<Tuple>();
+        List<Tuple> tupList = new ArrayList<Tuple>();
 
-	Tuple t1 = TF.newTuple();
-	t1.append(TF.newTuple(Lists.newArrayList("region", "state")));
-	t1.append(TF.newTuple(Lists.newArrayList("midwest", "OH")));
-	t1.append((long) 1);
+        Tuple t1 = TF.newTuple();
+        t1.append(TF.newTuple(Lists.newArrayList("region", "state")));
+        t1.append(TF.newTuple(Lists.newArrayList("midwest", "OH")));
+        t1.append((long) 1);
 
-	Tuple t2 = TF.newTuple();
-	t2.append(TF.newTuple(Lists.newArrayList("region", "state")));
-	t2.append(TF.newTuple(Lists.newArrayList("midwest", "OH")));
-	t2.append((long) 1);
+        Tuple t2 = TF.newTuple();
+        t2.append(TF.newTuple(Lists.newArrayList("region", "state")));
+        t2.append(TF.newTuple(Lists.newArrayList("midwest", "OH")));
+        t2.append((long) 1);
 
-	Tuple t3 = TF.newTuple();
-	t3.append(TF.newTuple(Lists.newArrayList("region", "state")));
-	t3.append(TF.newTuple(Lists.newArrayList("southwest", "CA")));
-	t3.append((long) 1);
+        Tuple t3 = TF.newTuple();
+        t3.append(TF.newTuple(Lists.newArrayList("region", "state")));
+        t3.append(TF.newTuple(Lists.newArrayList("southwest", "CA")));
+        t3.append((long) 1);
 
-	Tuple t4 = TF.newTuple();
-	t4.append(TF.newTuple(Lists.newArrayList("region", "state")));
-	t4.append(TF.newTuple(Lists.newArrayList("southwest", "CA")));
-	t4.append((long) 1);
+        Tuple t4 = TF.newTuple();
+        t4.append(TF.newTuple(Lists.newArrayList("region", "state")));
+        t4.append(TF.newTuple(Lists.newArrayList("southwest", "CA")));
+        t4.append((long) 1);
 
-	Tuple t5 = TF.newTuple();
-	t5.append(TF.newTuple(Lists.newArrayList("region", "state")));
-	t5.append(TF.newTuple(Lists.newArrayList("southwest", "CA")));
-	t5.append((long) 1);
+        Tuple t5 = TF.newTuple();
+        t5.append(TF.newTuple(Lists.newArrayList("region", "state")));
+        t5.append(TF.newTuple(Lists.newArrayList("southwest", "CA")));
+        t5.append((long) 1);
 
-	tupList.add(t1);
-	tupList.add(t2);
-	tupList.add(t3);
-	tupList.add(t4);
-	tupList.add(t5);
+        tupList.add(t1);
+        tupList.add(t2);
+        tupList.add(t3);
+        tupList.add(t4);
+        tupList.add(t5);
 
-	DataBag bag = BF.newDefaultBag(tupList);
-	Tuple in = TF.newTuple();
-	in.append(bag);
+        DataBag bag = BF.newDefaultBag(tupList);
+        Tuple in = TF.newTuple();
+        in.append(bag);
 
-	Set<Tuple> expected = ImmutableSet.of(TF.newTuple(Lists.newArrayList((int) 20)));
-	String[] ufArgs = new String[4];
-	ufArgs[0] = "10000";
-	ufArgs[1] = "1000";
-	ufArgs[2] = "100";
-	ufArgs[3] = "1.0";
-	PartitionMaxGroup mgs = new PartitionMaxGroup(ufArgs);
-	Tuple result = mgs.exec(in);
+        Set<Tuple> expected = ImmutableSet.of(TF.newTuple(Lists.newArrayList((int) 20)));
+        String[] ufArgs = new String[4];
+        ufArgs[0] = "10000";
+        ufArgs[1] = "1000";
+        ufArgs[2] = "100";
+        ufArgs[3] = "1.0";
+        PartitionMaxGroup mgs = new PartitionMaxGroup(ufArgs);
+        Tuple result = mgs.exec(in);
 
-	assertTrue("Expected: " + expected + " Got:" + result, expected.contains(result));
+        assertTrue("Expected: " + expected + " Got:" + result, expected.contains(result));
     }
 }

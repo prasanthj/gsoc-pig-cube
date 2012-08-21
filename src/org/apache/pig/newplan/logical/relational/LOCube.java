@@ -88,94 +88,94 @@ public class LOCube extends LogicalRelationalOperator {
     private Map<Integer, Long> generatedInputUids = new HashMap<Integer, Long>();
 
     public LOCube(LogicalPlan plan) {
-	super("LOCube", plan);
+        super("LOCube", plan);
     }
 
     @Override
     public LogicalSchema getSchema() throws FrontendException {
-	// if schema is calculated before, just return
-	if (schema != null) {
-	    return schema;
-	}
+        // if schema is calculated before, just return
+        if (schema != null) {
+            return schema;
+        }
 
-	// just return the immediate predecessor's schema
-	List<Operator> preds = plan.getPredecessors(this);
-	schema = null;
-	if (preds != null) {
-	    for (Operator pred : preds) {
-		if (pred instanceof LOCogroup) {
-		    schema = ((LogicalRelationalOperator) pred).getSchema();
-		}
-	    }
-	}
+        // just return the immediate predecessor's schema
+        List<Operator> preds = plan.getPredecessors(this);
+        schema = null;
+        if (preds != null) {
+            for (Operator pred : preds) {
+                if (pred instanceof LOCogroup) {
+                    schema = ((LogicalRelationalOperator) pred).getSchema();
+                }
+            }
+        }
 
-	return schema;
+        return schema;
     }
 
     @Override
     public void accept(PlanVisitor v) throws FrontendException {
-	try {
-	    ((LogicalRelationalNodesVisitor) v).visit(this);
-	} catch (ClassCastException cce) {
-	    throw new FrontendException("Expected LogicalPlanVisitor", cce);
-	}
+        try {
+            ((LogicalRelationalNodesVisitor) v).visit(this);
+        } catch (ClassCastException cce) {
+            throw new FrontendException("Expected LogicalPlanVisitor", cce);
+        }
     }
 
     @Override
     public boolean isEqual(Operator other) throws FrontendException {
-	try {
-	    return checkEquality((LogicalRelationalOperator) other);
-	} catch (ClassCastException cce) {
-	    throw new FrontendException("Exception while casting CUBE operator", cce);
-	}
+        try {
+            return checkEquality((LogicalRelationalOperator) other);
+        } catch (ClassCastException cce) {
+            throw new FrontendException("Exception while casting CUBE operator", cce);
+        }
     }
 
     public MultiMap<Integer, LogicalExpressionPlan> getExpressionPlans() {
-	return mExpressionPlans;
+        return mExpressionPlans;
     }
 
     public void setExpressionPlans(MultiMap<Integer, LogicalExpressionPlan> plans) {
-	this.mExpressionPlans = plans;
+        this.mExpressionPlans = plans;
     }
 
     @Override
     public void resetUid() {
-	generatedInputUids = new HashMap<Integer, Long>();
+        generatedInputUids = new HashMap<Integer, Long>();
     }
 
     public List<Operator> getInputs(LogicalPlan plan) {
-	return plan.getPredecessors(this);
+        return plan.getPredecessors(this);
     }
 
     public String getAlgebraicAttr() {
-	return algebraicAttr;
+        return algebraicAttr;
     }
 
     public void setAlgebraicAttr(String algebraicAttr) {
-	this.algebraicAttr = algebraicAttr;
+        this.algebraicAttr = algebraicAttr;
     }
 
     public MultiMap<Integer, String> getDimensions() {
-	return dimensions;
+        return dimensions;
     }
 
     public void setDimensions(MultiMap<Integer, String> dimensions) {
-	this.dimensions = dimensions;
+        this.dimensions = dimensions;
     }
 
     public List<String> getOperations() {
-	return operations;
+        return operations;
     }
 
     public void setOperations(List<String> operations) {
-	this.operations = operations;
+        this.operations = operations;
     }
 
     public int getAlgebraicAttrCol() {
-	return algebraicAttrCol;
+        return algebraicAttrCol;
     }
 
     public void setAlgebraicAttrCol(int algebraicAttrCol) {
-	this.algebraicAttrCol = algebraicAttrCol;
+        this.algebraicAttrCol = algebraicAttrCol;
     }
 }

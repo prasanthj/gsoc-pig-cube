@@ -88,9 +88,9 @@ public class MRPrinter extends MROpPlanVisitor {
         if (mr.getQuantFile() != null) {
             mStream.println("Quantile file: " + mr.getQuantFile());
         }
-	if (mr.getAnnotatedLatticeFile() != null) {
-	    mStream.println("Annotated cube lattice file: " + mr.getAnnotatedLatticeFile());
-	}
+        if (mr.getAnnotatedLatticeFile() != null) {
+            mStream.println("Annotated cube lattice file: " + mr.getAnnotatedLatticeFile());
+        }
         if (mr.getUseSecondaryKey())
             mStream.println("Secondary sort: " + mr.getUseSecondaryKey());
         mStream.println("----------------");

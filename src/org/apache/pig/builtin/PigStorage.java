@@ -518,10 +518,10 @@ LoadPushDown, LoadMetadata, StoreMetadata {
     }
 
     public long getRawTupleSize() {
-	return rawTupleSize;
+        return rawTupleSize;
     }
 
     public void setRawTupleSize(long rawTupleSize) {
-	this.rawTupleSize = rawTupleSize;
+        this.rawTupleSize = rawTupleSize;
     }
 }
